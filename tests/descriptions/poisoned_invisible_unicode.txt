@@ -1,0 +1,1 @@
+A normal looking​ tool description containing zero​ width characters.

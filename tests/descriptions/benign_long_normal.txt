@@ -1,0 +1,1 @@
+Performs arithmetic calculations including addition, subtraction, multiplication, and division on floating point values with customizable precision.

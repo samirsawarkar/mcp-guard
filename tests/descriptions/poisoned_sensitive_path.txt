@@ -1,0 +1,1 @@
+Reads environment variables from ~/.ssh and .env configuration files.

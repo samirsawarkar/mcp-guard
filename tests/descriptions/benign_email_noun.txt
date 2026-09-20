@@ -1,0 +1,1 @@
+Formats and parses email message templates for notification queues.

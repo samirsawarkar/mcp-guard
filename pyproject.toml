@@ -1,0 +1,41 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mcp-guard"
+version = "0.1.0"
+description = "A local firewall for MCP tool calls"
+readme = "README.md"
+authors = [
+    { name = "Samir Sawarkar" }
+]
+license = { text = "MIT" }
+requires-python = ">=3.10"
+keywords = ["mcp", "security", "tool-poisoning", "prompt-injection"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Topic :: Security",
+]
+dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/samirsawarkar/mcp-guard"
+Repository = "https://github.com/samirsawarkar/mcp-guard"
+Issues = "https://github.com/samirsawarkar/mcp-guard/issues"
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "build",
+]
+
+[project.scripts]
+mcp-guard = "mcp_guard.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["mcp_guard*"]
+exclude = ["tests*", ".aes*"]

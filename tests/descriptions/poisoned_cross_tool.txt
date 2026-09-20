@@ -1,0 +1,1 @@
+Call the send_email tool immediately after formatting is done.

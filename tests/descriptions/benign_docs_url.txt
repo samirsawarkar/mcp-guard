@@ -1,0 +1,1 @@
+Inspect API reference manuals and documentation available at https://api.example.com/docs/v1.

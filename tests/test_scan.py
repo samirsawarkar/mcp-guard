@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from pathlib import Path
 
 from mcp_guard.scan import scan_description, scan_manifest

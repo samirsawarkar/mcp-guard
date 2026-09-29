@@ -1,7 +1,9 @@
+from __future__ import annotations
+
 import subprocess
 import sys
 import threading
-from typing import BinaryIO, Callable
+from typing import Any, BinaryIO, Callable
 
 HookCallable = Callable[[bytes], bytes | None]
 

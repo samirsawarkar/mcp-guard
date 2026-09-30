@@ -8,6 +8,7 @@ import sys
 import pytest
 
 from mcp_guard.cli import main
+from mcp_guard.clients import is_wrapped_server
 from mcp_guard.config import get_guard_home
 
 
@@ -63,6 +64,8 @@ def test_init_fake_claude_desktop(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
 
     # filesystem wrapped
     assert "mcp-guard" in fs_srv["command"]
+    assert os.path.isabs(fs_srv["command"])
+    assert is_wrapped_server(fs_srv)
     assert fs_srv["args"] == [
         "run",
         "--name",
@@ -79,6 +82,8 @@ def test_init_fake_claude_desktop(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
 
     # github wrapped
     assert "mcp-guard" in gh_srv["command"]
+    assert os.path.isabs(gh_srv["command"])
+    assert is_wrapped_server(gh_srv)
     assert gh_srv["args"] == [
         "run",
         "--name",
@@ -211,11 +216,52 @@ def test_status_reporting(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsy
     guard_home.mkdir(parents=True, exist_ok=True)
     monkeypatch.setenv("MCP_GUARD_HOME", str(guard_home))
 
-    # Empty log initially
+    fake_home = tmp_path / "user_home"
+    fake_home.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv("HOME", str(fake_home))
+
+    # Empty log and no configs initially -> servers: none found
     rc = main(["status"])
     assert rc == 0
     out_empty, _ = capsys.readouterr()
+    assert "servers: none found" in out_empty
     assert "no calls logged yet — is your client restarted?" in out_empty
+
+    # Create real executable file named mcp-guard in tmp
+    real_launcher = tmp_path / "bin" / "mcp-guard"
+    real_launcher.parent.mkdir(parents=True, exist_ok=True)
+    real_launcher.write_text("#!/bin/sh\nexit 0\n")
+    real_launcher.chmod(0o755)
+
+    # Create fixture client configs with:
+    # 1. one wrapped whose command is a real executable file named mcp-guard (chmod +x)
+    # 2. one unwrapped
+    # 3. one remote (url)
+    # 4. one wrapped whose command path does not exist
+    claude_dir = fake_home / "Library" / "Application Support" / "Claude"
+    claude_dir.mkdir(parents=True, exist_ok=True)
+    cfg_file = claude_dir / "claude_desktop_config.json"
+    broken_cmd = str(tmp_path / "nonexistent" / "mcp-guard")
+    cfg_data = {
+        "mcpServers": {
+            "wrapped_ok": {
+                "command": str(real_launcher),
+                "args": ["run", "--name", "wrapped_ok", "--", "node", "ok.js"],
+            },
+            "unwrapped_srv": {
+                "command": "node",
+                "args": ["unwrapped.js"],
+            },
+            "remote_srv": {
+                "url": "https://example.com/sse",
+            },
+            "wrapped_broken": {
+                "command": broken_cmd,
+                "args": ["run", "--name", "wrapped_broken", "--", "node", "broken.js"],
+            },
+        }
+    }
+    cfg_file.write_text(json.dumps(cfg_data, indent=2), encoding="utf-8")
 
     # Create synthetic audit.jsonl
     now_iso = datetime.now(timezone.utc).isoformat()
@@ -223,7 +269,7 @@ def test_status_reporting(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsy
         # Benign allowed call
         json.dumps({
             "ts": now_iso,
-            "server": "filesystem",
+            "server": "wrapped_ok",
             "tool": "read_file",
             "argument_keys": ["path"],
             "allowed": True,
@@ -232,7 +278,7 @@ def test_status_reporting(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsy
         # 3 calls that would block
         json.dumps({
             "ts": now_iso,
-            "server": "github",
+            "server": "wrapped_broken",
             "tool": "delete_repo",
             "argument_keys": ["repo"],
             "allowed": False,
@@ -240,7 +286,7 @@ def test_status_reporting(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsy
         }),
         json.dumps({
             "ts": now_iso,
-            "server": "github",
+            "server": "wrapped_broken",
             "tool": "delete_repo",
             "argument_keys": ["repo"],
             "allowed": False,
@@ -248,7 +294,7 @@ def test_status_reporting(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsy
         }),
         json.dumps({
             "ts": now_iso,
-            "server": "github",
+            "server": "wrapped_broken",
             "tool": "delete_repo",
             "argument_keys": ["repo"],
             "allowed": False,
@@ -257,7 +303,7 @@ def test_status_reporting(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsy
         # Suspicious description
         json.dumps({
             "ts": now_iso,
-            "server": "filesystem",
+            "server": "wrapped_ok",
             "tool": "read_file",
             "argument_keys": [],
             "allowed": True,
@@ -291,15 +337,16 @@ def test_status_reporting(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsy
     out, _ = capsys.readouterr()
 
     assert "mode: audit" in out
-    assert "filesystem" in out
-    assert "github" in out
-    assert "postgres" in out
+    assert "protected (1): Claude Desktop/wrapped_ok" in out
+    assert "unprotected (1): Claude Desktop/unwrapped_srv   run 'mcp-guard init' to protect" in out
+    assert "broken (1): Claude Desktop/wrapped_broken   launcher not found; re-run 'mcp-guard init'" in out
+    assert "remote, not covered (1): Claude Desktop/remote_srv" in out
     assert "4 calls" in out
     assert "3 would-block" in out
     assert "1 suspicious description" in out
     assert "1 changed tools" in out
-    assert "github   delete_repo   unknown_tool   x3" in out
-    assert "filesystem   read_file   hidden_instruction" in out
+    assert "wrapped_broken   delete_repo   unknown_tool   x3" in out
+    assert "wrapped_ok   read_file   hidden_instruction" in out
     assert "postgres   query" in out
 
 

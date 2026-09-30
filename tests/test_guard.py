@@ -7,7 +7,7 @@ import subprocess
 import sys
 
 import pytest
-from mcp_guard.guard import Guard, accept_pin
+from mcp_guard.guard import Guard, accept_pin, pin_key
 
 FAKE_SERVER_PATH = Path(__file__).parent / "fake_server.py"
 
@@ -110,7 +110,7 @@ def test_call_with_extra_argument(tmp_path: Path):
 
 
 def test_call_before_tools_list_no_manifest(tmp_path: Path):
-    """4. call before any tools/list -> rule no_manifest, allowed True."""
+    """4. call before any tools/list -> rule no_manifest, allowed False."""
     guard = Guard(
         mode="enforce",
         audit_path=tmp_path / "audit.jsonl",
@@ -118,8 +118,84 @@ def test_call_before_tools_list_no_manifest(tmp_path: Path):
     )
 
     decision = guard.evaluate("search", {"query": "pytest"})
-    assert decision.allowed is True
+    assert decision.allowed is False
     assert decision.rule == "no_manifest"
+    assert decision.reason == "no tools/list seen yet; client must list tools before calling"
+
+    call_line = b'{"jsonrpc": "2.0", "id": 101, "method": "tools/call", "params": {"name": "search", "arguments": {"query": "pytest"}}}\n'
+
+    # (a) enforce + tools/call before tools/list -> line dropped, error reply sent, audit entry rule=no_manifest allowed=false
+    replies_a = []
+    guard_enforce = Guard(
+        mode="enforce",
+        audit_path=tmp_path / "audit_a.jsonl",
+        pins_path=tmp_path / "pins.json",
+        reply=lambda b: replies_a.append(b),
+    )
+    result_a = guard_enforce.client_line(call_line)
+    assert result_a is None
+    assert len(replies_a) == 1
+    err_resp = json.loads(replies_a[0].decode("utf-8"))
+    assert err_resp["id"] == 101
+    assert err_resp["error"]["code"] == -32001
+    assert "no_manifest" in err_resp["error"]["message"]
+
+    audit_lines_a = (tmp_path / "audit_a.jsonl").read_text(encoding="utf-8").strip().splitlines()
+    assert len(audit_lines_a) == 1
+    entry_a = json.loads(audit_lines_a[0])
+    assert entry_a["rule"] == "no_manifest"
+    assert entry_a["allowed"] is False
+
+    # (b) audit + same -> line passes through unchanged, audit entry allowed=false
+    guard_audit = Guard(
+        mode="audit",
+        audit_path=tmp_path / "audit_b.jsonl",
+        pins_path=tmp_path / "pins.json",
+    )
+    result_b = guard_audit.client_line(call_line)
+    assert result_b == call_line
+
+    audit_lines_b = (tmp_path / "audit_b.jsonl").read_text(encoding="utf-8").strip().splitlines()
+    assert len(audit_lines_b) == 1
+    entry_b = json.loads(audit_lines_b[0])
+    assert entry_b["rule"] == "no_manifest"
+    assert entry_b["allowed"] is False
+
+    # (c) enforce: tools/list, then list_changed notification, then tools/call -> blocked with no_manifest; after a fresh tools/list the same call is allowed
+    replies_c = []
+    guard_c = Guard(
+        mode="enforce",
+        audit_path=tmp_path / "audit_c.jsonl",
+        pins_path=tmp_path / "pins_c.json",
+        reply=lambda b: replies_c.append(b),
+    )
+    # tools/list
+    guard_c.client_line(b'{"jsonrpc": "2.0", "id": 1, "method": "tools/list"}\n')
+    guard_c.server_line(SAMPLE_TOOLS_LIST_RESPONSE)
+    assert guard_c.has_manifest is True
+
+    # list_changed notification
+    guard_c.server_line(b'{"jsonrpc": "2.0", "method": "notifications/tools/list_changed"}\n')
+    assert guard_c.has_manifest is False
+
+    # tools/call blocked with no_manifest
+    assert guard_c.client_line(call_line) is None
+    assert len(replies_c) == 1
+    err_c = json.loads(replies_c[0].decode("utf-8"))
+    assert "no_manifest" in err_c["error"]["message"]
+
+    # fresh tools/list
+    guard_c.client_line(b'{"jsonrpc": "2.0", "id": 2, "method": "tools/list"}\n')
+    resp2 = json.dumps({
+        "jsonrpc": "2.0",
+        "id": 2,
+        "result": json.loads(SAMPLE_TOOLS_LIST_RESPONSE.decode("utf-8"))["result"],
+    }).encode("utf-8") + b"\n"
+    guard_c.server_line(resp2)
+    assert guard_c.has_manifest is True
+
+    # same call is now allowed
+    assert guard_c.client_line(call_line) == call_line
 
 
 def test_audit_mode_denied_call_passes_unchanged(tmp_path: Path):
@@ -237,7 +313,7 @@ def test_tools_list_changed_clears_pinned_tools(tmp_path: Path):
     # Next call hits no_manifest
     decision = guard.evaluate("search", {"query": "x"})
     assert decision.rule == "no_manifest"
-    assert decision.allowed is True
+    assert decision.allowed is False
 
 
 def test_tools_list_pagination(tmp_path: Path):
@@ -521,4 +597,96 @@ def test_suspicious_description_scanner_logs_and_warns(tmp_path: Path, capsys):
     # Verify scanning never blocks by itself
     call_bytes = b'{"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": "poisoned_tool", "arguments": {}}}\n'
     assert guard.client_line(call_bytes) == call_bytes
+
+
+def test_pin_key_properties():
+    """same label, different server commands -> different pin keys; same label+command -> same key."""
+    k1 = pin_key("server", ["python", "server1.py"])
+    k2 = pin_key("server", ["python", "server2.py"])
+    k3 = pin_key("server", ["python", "server1.py"])
+    assert k1 != k2
+    assert k1 == k3
+
+    k_empty = pin_key("", ["cmd"])
+    assert k_empty.startswith("server-")
+    k_dots = pin_key("....", ["cmd"])
+    assert k_dots.startswith("server-")
+
+
+def test_pin_file_cannot_escape_pins_dir(tmp_path: Path):
+    """label '../../evil/x' -> pin file is inside pins dir."""
+    k = pin_key("../../evil/x", ["cmd"])
+    pins_dir = tmp_path / "pins"
+    pins_dir.mkdir(parents=True, exist_ok=True)
+    pin_file = pins_dir / f"{k}.json"
+    assert pin_file.resolve().parent == pins_dir.resolve()
+    assert "/" not in k and "\\" not in k
+    assert not k.startswith(".")
+
+    # Also test Guard default when pins_path is None
+    g = Guard(server="../../evil/x", home=tmp_path)
+    assert g.pins_path.resolve().parent == (tmp_path / "pins").resolve()
+    assert not str(g.pins_path).startswith(str(tmp_path / "evil"))
+
+
+def test_accept_pin_rejects_path_traversal(tmp_path: Path):
+    """accept_pin with '../x' returns False and writes nothing."""
+    pins_dir = tmp_path / "pins"
+    pins_dir.mkdir(parents=True, exist_ok=True)
+    res = accept_pin("../x", "any_tool", pins_dir=pins_dir)
+    assert res is False
+    assert list(pins_dir.iterdir()) == []
+    assert not (tmp_path / "x.json").exists()
+
+
+def test_run_pins_under_home_not_next_to_interpreter(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """mcp-guard run -- <absolute path to python> tests/fake_server.py (no --name) with MCP_GUARD_HOME=tmp:
+    after a tools/list, exactly one pin file exists under tmp/pins and nothing was written next to the interpreter.
+    """
+    python_bin = sys.executable
+    assert os.path.isabs(python_bin)
+    interpreter_sibling = Path(python_bin).parent / f"{Path(python_bin).name}.json"
+    sibling_existed_before = interpreter_sibling.exists()
+
+    monkeypatch.setenv("MCP_GUARD_HOME", str(tmp_path))
+
+    cmd = [
+        python_bin,
+        "-m",
+        "mcp_guard.cli",
+        "run",
+        "--home",
+        str(tmp_path),
+        "--",
+        python_bin,
+        str(FAKE_SERVER_PATH),
+    ]
+
+    proc = subprocess.Popen(
+        cmd,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+
+    proc.stdin.write(b'{"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}}\n')
+    proc.stdin.flush()
+
+    resp_line = proc.stdout.readline()
+    resp = json.loads(resp_line.decode("utf-8"))
+    assert resp["id"] == 1
+    assert "tools" in resp["result"]
+
+    proc.stdin.close()
+    proc.wait(timeout=5.0)
+
+    sibling_exists_after = interpreter_sibling.exists()
+    assert sibling_exists_after == sibling_existed_before
+    if not sibling_existed_before:
+        assert not interpreter_sibling.exists()
+
+    pins_dir = tmp_path / "pins"
+    pin_files = list(pins_dir.glob("*.json"))
+    assert len(pin_files) == 1
+
 

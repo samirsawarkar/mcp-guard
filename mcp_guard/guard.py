@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 import hashlib
 import json
 from pathlib import Path
+import re
 import sys
 from typing import Any, Callable, Dict, List, Set
 
@@ -23,6 +24,17 @@ class Decision:
 from mcp_guard.config import get_guard_home
 
 
+def _sanitize_label(label: str) -> str:
+    safe = re.sub(r"[^A-Za-z0-9._-]", "_", label).lstrip(".")[:64]
+    return safe or "server"
+
+
+def pin_key(label: str, server_command: list[str]) -> str:
+    safe = _sanitize_label(label)
+    h = hashlib.sha256(json.dumps([label, *server_command]).encode("utf-8")).hexdigest()[:12]
+    return f"{safe}-{h}"
+
+
 def accept_pin(
     server: str,
     tool: str,
@@ -30,8 +42,15 @@ def accept_pin(
     home: Path | str | None = None,
 ) -> bool:
     """Accept the latest observed hash for a changed tool."""
+    if "/" in server or "\\" in server or ".." in server:
+        return False
     p_dir = Path(pins_dir) if pins_dir else get_guard_home(home) / "pins"
     pins_file = p_dir / f"{server}.json"
+    try:
+        if pins_file.resolve().parent != p_dir.resolve():
+            return False
+    except Exception:
+        return False
     if not pins_file.exists():
         return False
     try:
@@ -70,7 +89,7 @@ class Guard:
 
         self.server = server
         if pins_path is None:
-            self.pins_path = self.home / "pins" / f"{self.server}.json"
+            self.pins_path = self.home / "pins" / f"{_sanitize_label(self.server)}.json"
         else:
             self.pins_path = Path(pins_path)
 
@@ -99,9 +118,9 @@ class Guard:
         # Rule 1: unknown_tool (or no_manifest if tools/list not yet seen)
         if not self.has_manifest:
             return Decision(
-                allowed=True,
+                allowed=False,
                 rule="no_manifest",
-                reason="No tools/list seen yet; cannot judge tool",
+                reason="no tools/list seen yet; client must list tools before calling",
                 tool=tool_name,
                 argument_keys=arg_keys,
             )

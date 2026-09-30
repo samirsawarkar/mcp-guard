@@ -24,7 +24,7 @@ from mcp_guard.clients import (
     wrap_server_entry,
 )
 from mcp_guard.config import get_config_mode, get_guard_home, set_config_mode
-from mcp_guard.guard import Guard, accept_pin
+from mcp_guard.guard import Guard, accept_pin, pin_key
 from mcp_guard.proxy import run_proxy
 
 
@@ -104,14 +104,16 @@ def handle_run(args: argparse.Namespace) -> int:
         sys.stderr.flush()
         return 1
 
-    server_label = args.name if args.name else cmd[0]
+    label = args.name or Path(cmd[0]).name
+    guard_home = get_guard_home(args.home)
+    pins_path = guard_home / "pins" / f"{pin_key(label, cmd)}.json"
     audit_path = Path(args.audit_log) if args.audit_log else None
-    home = Path(args.home) if args.home else None
     guard = Guard(
         mode=args.mode,
         audit_path=audit_path,
-        home=home,
-        server=server_label,
+        pins_path=pins_path,
+        home=guard_home,
+        server=label,
     )
 
     return run_proxy(proc, guard=guard)
@@ -130,7 +132,7 @@ def handle_init(args: argparse.Namespace) -> int:
     # Detect mcp-guard path
     mcp_guard_which = shutil.which("mcp-guard")
     if mcp_guard_which:
-        mcp_guard_cmd = "mcp-guard"
+        mcp_guard_cmd = os.path.abspath(mcp_guard_which)
     else:
         resolved_argv0 = Path(sys.argv[0]).resolve()
         if "mcp-guard" in resolved_argv0.name:
@@ -256,35 +258,43 @@ def handle_status(args: argparse.Namespace) -> int:
     print(f"mode: {mode} ({mode_desc})")
 
     # Servers list
-    pins_dir = home / "pins"
-    servers: set[str] = set()
-    if pins_dir.exists():
-        for p in pins_dir.glob("*.json"):
-            servers.add(p.stem)
+    protected: list[str] = []
+    unprotected: list[str] = []
+    broken: list[str] = []
+    remote: list[str] = []
 
-    for _, c_path in discover_configs():
+    for client_name, c_path in discover_configs():
         try:
             d = json.loads(c_path.read_text(encoding="utf-8"))
-            for entry in find_server_entries(d, "", c_path):
-                servers.add(entry.name)
+            for entry in find_server_entries(d, client_name, c_path):
+                label = f"{entry.client_name}/{entry.name}"
+                if is_remote_server(entry.data):
+                    remote.append(label)
+                elif is_wrapped_server(entry.data):
+                    cmd = str(entry.data.get("command", ""))
+                    if shutil.which(cmd):
+                        protected.append(label)
+                    else:
+                        broken.append(label)
+                else:
+                    unprotected.append(label)
         except Exception:
             pass
+
+    total_servers = len(protected) + len(unprotected) + len(broken) + len(remote)
+    if total_servers == 0:
+        print("servers: none found")
+    else:
+        if protected:
+            print(f"protected ({len(protected)}): {', '.join(sorted(protected))}")
+        if unprotected:
+            print(f"unprotected ({len(unprotected)}): {', '.join(sorted(unprotected))}   run 'mcp-guard init' to protect")
+        if broken:
+            print(f"broken ({len(broken)}): {', '.join(sorted(broken))}   launcher not found; re-run 'mcp-guard init'")
+        if remote:
+            print(f"remote, not covered ({len(remote)}): {', '.join(sorted(remote))}")
 
     audit_file = home / "audit.jsonl"
-    if audit_file.exists():
-        try:
-            for l in audit_file.read_text(encoding="utf-8").splitlines():
-                if l.strip():
-                    entry_obj = json.loads(l)
-                    srv = entry_obj.get("server")
-                    if srv and srv != "unknown":
-                        servers.add(srv)
-        except Exception:
-            pass
-
-    server_str = ", ".join(sorted(servers)) if servers else "none"
-    print(f"servers: {server_str}")
-
     if not audit_file.exists() or audit_file.stat().st_size == 0:
         print("no calls logged yet — is your client restarted?")
         return 0

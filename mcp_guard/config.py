@@ -4,6 +4,8 @@ import json
 import os
 from pathlib import Path
 
+from mcp_guard.clients import write_json_atomic
+
 
 def get_guard_home(override: Path | str | None = None) -> Path:
     """Resolve the mcp-guard state directory.
@@ -46,4 +48,4 @@ def set_config_mode(mode: str, home: Path | str | None = None) -> None:
         except Exception:
             pass
     cfg["mode"] = mode
-    cfg_file.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
+    write_json_atomic(cfg_file, cfg)

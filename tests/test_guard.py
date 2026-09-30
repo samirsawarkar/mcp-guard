@@ -639,6 +639,30 @@ def test_accept_pin_rejects_path_traversal(tmp_path: Path):
     assert not (tmp_path / "x.json").exists()
 
 
+def test_accept_pin_allows_legitimate_double_dot(tmp_path: Path):
+    """a pin file named 'a..b-abc123def456.json' with an observed_sha256 can be accepted;
+    '../x' is still rejected.
+    """
+    pins_dir = tmp_path / "pins"
+    pins_dir.mkdir(parents=True, exist_ok=True)
+    pin_file = pins_dir / "a..b-abc123def456.json"
+    pin_file.write_text(
+        json.dumps({
+            "test_tool": {
+                "sha256": "initial_sha",
+                "observed_sha256": "updated_sha",
+            }
+        })
+    )
+    ok = accept_pin("a..b-abc123def456", "test_tool", pins_dir=pins_dir)
+    assert ok is True
+    data = json.loads(pin_file.read_text(encoding="utf-8"))
+    assert data["test_tool"]["sha256"] == "updated_sha"
+    assert "observed_sha256" not in data["test_tool"]
+
+    assert accept_pin("../x", "test_tool", pins_dir=pins_dir) is False
+
+
 def test_run_pins_under_home_not_next_to_interpreter(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     """mcp-guard run -- <absolute path to python> tests/fake_server.py (no --name) with MCP_GUARD_HOME=tmp:
     after a tools/list, exactly one pin file exists under tmp/pins and nothing was written next to the interpreter.

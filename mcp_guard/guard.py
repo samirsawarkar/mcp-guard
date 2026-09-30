@@ -21,6 +21,7 @@ class Decision:
     argument_keys: list[str]
 
 
+from mcp_guard.clients import write_json_atomic
 from mcp_guard.config import get_guard_home
 
 
@@ -42,7 +43,7 @@ def accept_pin(
     home: Path | str | None = None,
 ) -> bool:
     """Accept the latest observed hash for a changed tool."""
-    if "/" in server or "\\" in server or ".." in server:
+    if "/" in server or "\\" in server:
         return False
     p_dir = Path(pins_dir) if pins_dir else get_guard_home(home) / "pins"
     pins_file = p_dir / f"{server}.json"
@@ -63,7 +64,7 @@ def accept_pin(
     if "observed_sha256" in tool_entry:
         tool_entry["sha256"] = tool_entry.pop("observed_sha256")
         tool_entry.pop("observed_at", None)
-        pins_file.write_text(json.dumps(pins, indent=2), encoding="utf-8")
+        write_json_atomic(pins_file, pins)
         return True
     return False
 
@@ -109,8 +110,7 @@ class Guard:
         return {}
 
     def _save_pins(self, pins: Dict[str, Any]) -> None:
-        self.pins_path.parent.mkdir(parents=True, exist_ok=True)
-        self.pins_path.write_text(json.dumps(pins, indent=2), encoding="utf-8")
+        write_json_atomic(self.pins_path, pins)
 
     def evaluate(self, tool_name: str, arguments: dict) -> Decision:
         arg_keys = sorted(list(arguments.keys()))

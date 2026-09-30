@@ -4,8 +4,49 @@ from dataclasses import dataclass
 import json
 import os
 from pathlib import Path
+import stat
 import sys
+import tempfile
 from typing import Any, Dict, List, Optional, Tuple
+
+
+def write_json_atomic(path: Path | str, data: Any) -> None:
+    """Write JSON data to path atomically using a temporary file.
+
+    Preserves symlinks (writes to resolved target) and existing file permissions.
+    """
+    p = Path(path)
+    content = json.dumps(data, indent=2) + "\n"
+    target = p.resolve() if p.is_symlink() else p
+    target.parent.mkdir(parents=True, exist_ok=True)
+
+    tmp_path: Optional[Path] = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            dir=target.parent,
+            prefix=f".{target.name}.",
+            suffix=".tmp",
+            delete=False,
+            encoding="utf-8",
+        ) as tf:
+            tmp_path = Path(tf.name)
+            tf.write(content)
+            tf.flush()
+            os.fsync(tf.fileno())
+
+        if target.exists():
+            mode = stat.S_IMODE(target.stat().st_mode)
+            os.chmod(tmp_path, mode)
+
+        os.replace(tmp_path, target)
+    except Exception:
+        if tmp_path is not None and tmp_path.exists():
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+        raise
 
 
 @dataclass

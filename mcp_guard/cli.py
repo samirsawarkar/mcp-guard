@@ -22,6 +22,7 @@ from mcp_guard.clients import (
     set_server_entry_mode,
     unwrap_server_entry,
     wrap_server_entry,
+    write_json_atomic,
 )
 from mcp_guard.config import get_config_mode, get_guard_home, set_config_mode
 from mcp_guard.guard import Guard, accept_pin, pin_key
@@ -148,13 +149,17 @@ def handle_init(args: argparse.Namespace) -> int:
 
     mode = args.mode or "audit"
     total_protected = 0
+    has_errors = False
 
     for client_name, config_path in discovered:
         try:
             content = config_path.read_text(encoding="utf-8")
             data = json.loads(content)
+            if not isinstance(data, dict):
+                raise ValueError("config root must be a JSON object")
         except Exception as e:
-            sys.stderr.write(f"mcp-guard: error reading {format_display_path(config_path)}: {e}\n")
+            sys.stderr.write(f"mcp-guard: error: {format_display_path(config_path)}: {e}\n")
+            has_errors = True
             continue
 
         entries = find_server_entries(data, client_name, config_path)
@@ -180,22 +185,31 @@ def handle_init(args: argparse.Namespace) -> int:
                 print(f"  wrapped   {entry.name}")
 
         if modified:
-            config_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+            try:
+                write_json_atomic(config_path, data)
+            except Exception as e:
+                sys.stderr.write(f"mcp-guard: error: {format_display_path(config_path)}: {e}\n")
+                has_errors = True
 
     set_config_mode(mode, home=home)
     print(f"{total_protected} servers protected in {mode} mode. Restart your client. Then: mcp-guard status")
-    return 0
+    return 1 if has_errors else 0
 
 
 def handle_uninstall(args: argparse.Namespace) -> int:
     discovered = discover_configs(client_filter=getattr(args, "client", None))
     total_unwrapped = 0
+    has_errors = False
 
     for client_name, config_path in discovered:
         try:
             content = config_path.read_text(encoding="utf-8")
             data = json.loads(content)
-        except Exception:
+            if not isinstance(data, dict):
+                raise ValueError("config root must be a JSON object")
+        except Exception as e:
+            sys.stderr.write(f"mcp-guard: error: {format_display_path(config_path)}: {e}\n")
+            has_errors = True
             continue
 
         entries = find_server_entries(data, client_name, config_path)
@@ -213,22 +227,31 @@ def handle_uninstall(args: argparse.Namespace) -> int:
                 print(f"  unwrapped   {entry.name}")
 
         if modified:
-            config_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+            try:
+                write_json_atomic(config_path, data)
+            except Exception as e:
+                sys.stderr.write(f"mcp-guard: error: {format_display_path(config_path)}: {e}\n")
+                has_errors = True
 
     print(f"{total_unwrapped} servers restored to original configuration. Restart your client.")
-    return 0
+    return 1 if has_errors else 0
 
 
 def handle_mode_switch(new_mode: str, home_override: Path | str | None = None) -> int:
     home = get_guard_home(home_override)
     discovered = discover_configs()
     total_switched = 0
+    has_errors = False
 
     for client_name, config_path in discovered:
         try:
             content = config_path.read_text(encoding="utf-8")
             data = json.loads(content)
-        except Exception:
+            if not isinstance(data, dict):
+                raise ValueError("config root must be a JSON object")
+        except Exception as e:
+            sys.stderr.write(f"mcp-guard: error: {format_display_path(config_path)}: {e}\n")
+            has_errors = True
             continue
 
         entries = find_server_entries(data, client_name, config_path)
@@ -240,11 +263,15 @@ def handle_mode_switch(new_mode: str, home_override: Path | str | None = None) -
                 total_switched += 1
 
         if modified:
-            config_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+            try:
+                write_json_atomic(config_path, data)
+            except Exception as e:
+                sys.stderr.write(f"mcp-guard: error: {format_display_path(config_path)}: {e}\n")
+                has_errors = True
 
     set_config_mode(new_mode, home=home)
     print(f"{total_switched} servers switched to {new_mode} mode. Restart your client.")
-    return 0
+    return 1 if has_errors else 0
 
 
 def handle_status(args: argparse.Namespace) -> int:

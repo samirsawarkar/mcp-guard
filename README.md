@@ -3,7 +3,7 @@
 [![CI](https://github.com/samirsawarkar/mcp-guard/actions/workflows/ci.yml/badge.svg)](https://github.com/samirsawarkar/mcp-guard/actions)
 [![PyPI](https://img.shields.io/pypi/v/mcp-guard.svg)](https://pypi.org/project/mcp-guard/)
 
-A local firewall for MCP tool calls. Sits between your AI client and your MCP servers; logs every tool call, flags poisoned tool descriptions, and (when you turn it on) blocks calls that break the rules.
+mcp-guard is a local integrity monitor for stdio MCP servers. It sits between your AI client and your servers, logs every tool call (argument names only), scans tool descriptions for poisoning, pins tool definitions to catch silent changes, and in enforce mode blocks calls that break the rules.
 
 ## 30-second install
 
@@ -20,10 +20,10 @@ mcp-guard status
 
 ```text
 mode: audit (nothing is blocked; run 'mcp-guard enforce' to block)
-servers: filesystem, github, postgres
-last 24h: 142 calls, 0 would-block, 1 suspicious description, 0 changed tools
+protected (3): Claude Desktop/filesystem, Claude Desktop/github, Claude Desktop/postgres
+last 24h: 142 calls, 1 would-block, 1 suspicious description, 0 changed tools
 would block:
-  github   delete_repo   unknown_tool   x3
+  github   delete_repo   unknown_tool   x1
 suspicious:
   filesystem   read_file   hidden_instruction
 changed tools: none
@@ -33,6 +33,7 @@ changed tools: none
 
 | Rule | What it catches | Blocks in enforce? |
 | --- | --- | --- |
+| `no_manifest` | A tool call arrives before the client has listed tools (or right after the server said its tool list changed) | Yes |
 | `unknown_tool` | Client calls a tool not declared in the server's tools/list manifest | Yes |
 | `extra_argument` | Client sends arguments not defined in the tool's inputSchema | Yes |
 | `tool_changed` | Server silently altered a tool's schema or description after first run (rug-pull) | Yes |
@@ -44,10 +45,33 @@ Default is audit: nothing changes for you, you just get a log. Run `mcp-guard en
 
 ## What it does NOT do
 
-- Does not see your chat messages, so it cannot check whether a tool call's arguments match what you asked (that check exists in the underlying research but needs the user turn — coming as a library API for people who run their own agent loop).
+- Does not see your chat messages, so it cannot check whether a tool call's arguments match what you asked (that check exists in the underlying research but needs the user turn; coming as a library API for people who run their own agent loop).
 - Does not inspect tool RESULTS.
 - Does not protect remote (HTTP/SSE) servers yet.
 - Heuristic scanner can miss things and can false-positive; that's why it only warns.
+
+## Measured on MCPTox
+
+We ran mcp-guard's own rules over MCPTox, a public tool-poisoning benchmark (1,312 poisoned tools on 45 real MCP servers, 10,227 recorded model responses labelled by the benchmark authors). $0, no model calls. Script: `bench/mcptox_bench.py`, results: `bench/results_mcptox.json`.
+
+| Check | Result | 95% CI |
+| --- | --- | --- |
+| Scanner: poisoned descriptions flagged | 70.4% (924 / 1,312) | 67.9 to 72.8% |
+| Scanner: clean descriptions flagged (false positives) | 0.9% (3 / 327) | 0.3 to 2.7% |
+| Call rules: successful attacks blocked | 3.8% (62 / 1,653) | 2.9 to 4.8% |
+| Call rules: harmless responses blocked | 3.5% (184 / 5,188) | 3.1 to 4.1% |
+| Pinning: attacks detected | 0% (0 / 1,312) | n/a |
+
+What this means:
+- The scanner is the part that works against this attack. Today it only warns: the poisoned tool still reaches the model.
+- The call rules barely help here: MCPTox attacks call real, listed tools with valid arguments.
+- Pinning catches a tool that changes after you first saw it. Every MCPTox attack adds a new tool instead, so pinning sees none of them.
+
+Reproduce:
+```bash
+python bench/mcptox_bench.py
+```
+Needs the MCPTox data file from inspect-evals-mcptox (default path ~/Library/Caches/inspect_evals_mcptox/response_all.json, override with --data).
 
 ## Where things live
 
@@ -60,7 +84,7 @@ Default is audit: nothing changes for you, you just get a log. Run `mcp-guard en
 ## All commands
 
 - `mcp-guard init`: Finds client configs and wraps stdio MCP servers in audit mode.
-- `mcp-guard status`: Displays protection mode, configured servers, 24h call counts, would-blocks, and warnings.
+- `mcp-guard status`: Shows protection mode, which servers are protected, unprotected, broken, or remote, 24h call counts, would-blocks, and warnings.
 - `mcp-guard log`: Displays audit log entries in `<time> <server> <tool> <rule>` format; supports `--tail N` and `--follow`.
 - `mcp-guard enforce`: Switches all wrapped servers to enforce mode.
 - `mcp-guard audit`: Switches all wrapped servers to audit mode.
@@ -70,7 +94,7 @@ Default is audit: nothing changes for you, you just get a log. Run `mcp-guard en
 
 ## Why
 
-Built from FAULTLINE's P8 study on the MCPTox benchmark, where a client-side provenance contract cut pooled attack success from 30% to 7% across six models. See https://github.com/samirsawarkar/faultline-ai-reliability. The proxy implements the subset of that contract that does not need the user's message.
+Built from FAULTLINE's P8 study (https://github.com/samirsawarkar/faultline-ai-reliability). There, a client-side contract cut MCPTox attack success from 30% to 7% across six models, mostly through a rule that checks each argument against the user's own message. A proxy never sees that message, so mcp-guard ships the parts that do not need it. The numbers above are mcp-guard's own, not P8's.
 
 ## License
 

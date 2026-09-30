@@ -1,0 +1,66 @@
+name: Publish to PyPI
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install build tool
+        run: pip install build
+
+      - name: Verify tag matches package version
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          python -c '
+          import os, sys, re
+          from pathlib import Path
+
+          tag = os.environ["TAG"]
+          if not tag.startswith("v"):
+              sys.exit(f"Tag does not start with v: {tag}")
+          tag_version = tag[1:]
+
+          pyproject = Path("pyproject.toml").read_text(encoding="utf-8")
+          match = re.search(r"(?m)^version\s*=\s*[\"\x27]([^\"\x27]+)[\"\x27]", pyproject)
+          if not match:
+              sys.exit("Version not found in pyproject.toml")
+          pyproject_version = match.group(1)
+
+          init_py = Path("mcp_guard/__init__.py").read_text(encoding="utf-8")
+          match_init = re.search(r"(?m)^__version__\s*=\s*[\"\x27]([^\"\x27]+)[\"\x27]", init_py)
+          if not match_init:
+              sys.exit("Version not found in mcp_guard/__init__.py")
+          code_version = match_init.group(1)
+
+          print(f"Tag version:       {tag_version}")
+          print(f"pyproject version: {pyproject_version}")
+          print(f"code version:      {code_version}")
+
+          if tag_version != pyproject_version:
+              sys.exit(f"Tag version ({tag_version}) != pyproject.toml version ({pyproject_version})")
+          if tag_version != code_version:
+              sys.exit(f"Tag version ({tag_version}) != mcp_guard.__version__ ({code_version})")
+          print("Version verification passed.")
+          '
+
+      - name: Build sdist and wheel
+        run: python -m build
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1

@@ -10,15 +10,51 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest]
-        python-version: ["3.10", "3.12", "3.13"]
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
 
     steps:
       - uses: actions/checkout@v4
+
       - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
+
       - name: Install dependencies
-        run: pip install -e .[dev]
-      - name: Run tests
+        run: pip install -e ".[dev]"
+
+      - name: Run unit tests
         run: pytest -q
+
+      - name: Build sdist and wheel
+        run: python -m build
+
+      - name: Check wheel contents
+        run: |
+          python -c '
+          import sys, zipfile
+          from pathlib import Path
+
+          wheels = list(Path("dist").glob("*.whl"))
+          if not wheels:
+              sys.exit("No wheel file found in dist/")
+          wheel = wheels[0]
+          print(f"Checking wheel: {wheel}")
+
+          with zipfile.ZipFile(wheel) as z:
+              names = z.namelist()
+              for name in names:
+                  print(f"  {name}")
+                  if not (name.startswith("mcp_guard/") or ".dist-info/" in name):
+                      sys.exit(f"Unexpected file in wheel: {name}")
+                  for forbidden in ("tests/", "bench/", ".aes/"):
+                      if forbidden in name:
+                          sys.exit(f"Forbidden directory in wheel: {name}")
+          print("Wheel content check passed.")
+          '
+
+      - name: Install wheel in fresh venv and run e2e test
+        run: |
+          python -m venv test_venv
+          test_venv/bin/pip install dist/*.whl
+          MCP_GUARD_BIN="$PWD/test_venv/bin/mcp-guard" pytest -q tests/test_e2e_installed.py -v

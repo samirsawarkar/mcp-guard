@@ -554,10 +554,10 @@ def test_enforce_blocks_delete_everything_subprocess(tmp_path: Path):
 
 
 def test_suspicious_description_scanner_logs_and_warns(tmp_path: Path, capsys):
-    """Verify description scanner logs suspicious findings to stderr and audit log, but never blocks."""
+    """Verify description scanner logs suspicious findings to stderr and audit log in audit mode, but never blocks."""
     audit_file = tmp_path / "audit.jsonl"
     guard = Guard(
-        mode="enforce",
+        mode="audit",
         audit_path=audit_file,
         pins_path=tmp_path / "pins.json",
     )

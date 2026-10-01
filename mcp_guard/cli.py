@@ -25,7 +25,7 @@ from mcp_guard.clients import (
     write_json_atomic,
 )
 from mcp_guard.config import get_config_mode, get_guard_home, set_config_mode
-from mcp_guard.guard import Guard, accept_pin, pin_key
+from mcp_guard.guard import Guard, accept_pin, pin_key, trust_pin
 from mcp_guard.proxy import run_proxy
 
 
@@ -77,6 +77,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     # 8. pin
     pin_parser = subparsers.add_parser("pin", help="Manage pinned tool hashes")
     pin_parser.add_argument("--accept", nargs=2, metavar=("SERVER", "TOOL"), help="Accept updated hash for a tool on a server")
+    pin_parser.add_argument("--trust", nargs=2, metavar=("SERVER", "TOOL"), help="Trust a tool to bypass quarantine")
     pin_parser.add_argument("--list", action="store_true", help="List pinned tools and change status")
     pin_parser.add_argument("--pins-dir", metavar="PATH", default=None, help="Path to pins directory")
     pin_parser.add_argument("--home", metavar="PATH", default=None, help="State directory")
@@ -338,10 +339,12 @@ def handle_status(args: argparse.Namespace) -> int:
     would_block_count = 0
     suspicious_count = 0
     changed_count = 0
+    quarantined_count = 0
 
     would_blocks: dict[tuple[str, str, str], int] = {}
     suspicious_items: list[tuple[str, str, str]] = []
     changed_tools_set: set[tuple[str, str]] = set()
+    quarantined_items: list[tuple[str, str, str]] = []
 
     for line in lines:
         try:
@@ -367,6 +370,11 @@ def handle_status(args: argparse.Namespace) -> int:
             suspicious_count += 1
             for f in entry.get("findings", []):
                 suspicious_items.append((server, tool, f))
+        elif rule == "quarantined":
+            quarantined_count += 1
+            findings_val = entry.get("findings", [])
+            findings_str = ",".join(findings_val) if isinstance(findings_val, list) else str(findings_val)
+            quarantined_items.append((server, tool, findings_str))
         elif rule == "tool_changed":
             changed_count += 1
             changed_tools_set.add((server, tool))
@@ -378,7 +386,7 @@ def handle_status(args: argparse.Namespace) -> int:
                 would_blocks[key] = would_blocks.get(key, 0) + 1
 
     print(
-        f"last 24h: {total_calls} calls, {would_block_count} would-block, {suspicious_count} suspicious description, {changed_count} changed tools"
+        f"last 24h: {total_calls} calls, {would_block_count} would-block, {suspicious_count} suspicious description, {changed_count} changed tools, {quarantined_count} quarantined"
     )
 
     if would_blocks:
@@ -389,6 +397,11 @@ def handle_status(args: argparse.Namespace) -> int:
     if suspicious_items:
         print("suspicious:")
         for srv, t, f in suspicious_items:
+            print(f"  {srv}   {t}   {f}")
+
+    if quarantined_items:
+        print("quarantined:")
+        for srv, t, f in quarantined_items:
             print(f"  {srv}   {t}   {f}")
 
     if changed_tools_set:
@@ -464,9 +477,35 @@ def handle_pin(args: argparse.Namespace) -> int:
             for tool_name, info in sorted(data.items()):
                 first_seen = info.get("first_seen", "")
                 has_change = "observed_sha256" in info
-                status_str = "changed (pending accept)" if has_change else "up to date"
+                current_pinned = info.get("observed_sha256") or info.get("sha256")
+                is_trusted = bool(
+                    info.get("trusted_sha256")
+                    and info.get("trusted_sha256") == current_pinned
+                )
+                if has_change and not is_trusted:
+                    status_str = "changed (pending accept)"
+                elif is_trusted:
+                    status_str = "trusted"
+                else:
+                    status_str = "up to date"
                 print(f"{srv}   {tool_name}   {first_seen}   {status_str}")
         return 0
+
+    if args.trust:
+        server_name, tool_name = args.trust
+        ok = trust_pin(server_name, tool_name, pins_dir=pins_dir, home=home)
+        if ok:
+            sys.stderr.write(
+                f"[mcp-guard] Trusted tool '{tool_name}' on server '{server_name}'\n"
+            )
+            sys.stderr.flush()
+            return 0
+        else:
+            sys.stderr.write(
+                f"mcp-guard: failed to trust tool '{tool_name}' on server '{server_name}' (server pin or tool missing)\n"
+            )
+            sys.stderr.flush()
+            return 1
 
     if args.accept:
         server_name, tool_name = args.accept

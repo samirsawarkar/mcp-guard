@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 import re
 import sys
-from typing import Any, Callable, Dict, List, Set
+from typing import Any, Callable, Dict, List, Set, Tuple
 
 from mcp_guard.scan import scan_manifest
 
@@ -19,6 +19,14 @@ class Decision:
     reason: str
     tool: str
     argument_keys: list[str]
+
+
+QUARANTINE_FINDINGS: frozenset[str] = frozenset({
+    "hidden_instruction",
+    "exfiltration_target",
+    "sensitive_path",
+    "invisible_unicode",
+})
 
 
 from mcp_guard.clients import write_json_atomic
@@ -69,6 +77,39 @@ def accept_pin(
     return False
 
 
+def trust_pin(
+    server: str,
+    tool: str,
+    pins_dir: Path | str | None = None,
+    home: Path | str | None = None,
+) -> bool:
+    """Store trusted_sha256 for a tool to bypass quarantine."""
+    if "/" in server or "\\" in server:
+        return False
+    p_dir = Path(pins_dir) if pins_dir else get_guard_home(home) / "pins"
+    pins_file = p_dir / f"{server}.json"
+    try:
+        if pins_file.resolve().parent != p_dir.resolve():
+            return False
+    except Exception:
+        return False
+    if not pins_file.exists():
+        return False
+    try:
+        pins = json.loads(pins_file.read_text(encoding="utf-8"))
+    except Exception:
+        return False
+    if tool not in pins:
+        return False
+    tool_entry = pins[tool]
+    target_hash = tool_entry.get("observed_sha256") or tool_entry.get("sha256")
+    if not target_hash:
+        return False
+    tool_entry["trusted_sha256"] = target_hash
+    write_json_atomic(pins_file, pins)
+    return True
+
+
 class Guard:
     def __init__(
         self,
@@ -100,6 +141,15 @@ class Guard:
         self.has_manifest: bool = False
         self._pending_cursorless_tools_list_ids: Set[Any] = set()
         self._pending_paginated_tools_list_ids: Set[Any] = set()
+        # tool name -> (rule, findings) last logged, so later pages don't re-log unchanged findings
+        self._logged_findings: Dict[str, Tuple[str, frozenset]] = {}
+
+    def _should_log_findings(self, tool_name: str, rule: str, findings: List[str]) -> bool:
+        key = (rule, frozenset(findings))
+        if self._logged_findings.get(tool_name) == key:
+            return False
+        self._logged_findings[tool_name] = key
+        return True
 
     def _load_pins(self) -> Dict[str, Any]:
         if self.pins_path.exists():
@@ -266,6 +316,7 @@ class Guard:
         method = data.get("method")
         if method == "notifications/tools/list_changed":
             self.tools.clear()
+            self._logged_findings.clear()
             self.has_manifest = False
             return line
 
@@ -277,6 +328,7 @@ class Guard:
                 if is_cursorless:
                     self._pending_cursorless_tools_list_ids.remove(req_id)
                     self.tools.clear()
+                    self._logged_findings.clear()
                 else:
                     self._pending_paginated_tools_list_ids.remove(req_id)
 
@@ -352,31 +404,88 @@ class Guard:
                         if pins_updated:
                             self._save_pins(pins)
 
-                        # Run description scanner on pinned tools
-                        # Scanning never blocks by itself, in either mode — it warns.
-                        # (It is a heuristic; blocking on it would be false-positive hell. Say this in a comment.)
+                        # Run description scanner on tools
                         manifest_descriptions = {
                             t_name: t_val["description"]
                             for t_name, t_val in self.tools.items()
                         }
+                        # Scan the cumulative manifest: a later page can add findings
+                        # (cross_tool_reference) to a tool listed on an earlier page.
                         findings_by_tool = scan_manifest(manifest_descriptions)
-                        for tool_name, findings in findings_by_tool.items():
-                            if findings:
-                                findings_str = ",".join(findings)
-                                sys.stderr.write(
-                                    f"[mcp-guard] SUSPICIOUS tool={tool_name} findings={findings_str}\n"
-                                )
-                                sys.stderr.flush()
-                                self._log_audit(
-                                    Decision(
-                                        allowed=True,
-                                        rule="suspicious_description",
-                                        reason=f"Suspicious description findings: {findings_str}",
-                                        tool=tool_name,
-                                        argument_keys=[],
-                                    ),
-                                    extra={"findings": findings},
-                                )
+                        if self.mode == "audit":
+                            for tool_name, findings in findings_by_tool.items():
+                                if findings and self._should_log_findings(tool_name, "suspicious_description", findings):
+                                    findings_str = ",".join(findings)
+                                    sys.stderr.write(
+                                        f"[mcp-guard] SUSPICIOUS tool={tool_name} findings={findings_str}\n"
+                                    )
+                                    sys.stderr.flush()
+                                    self._log_audit(
+                                        Decision(
+                                            allowed=True,
+                                            rule="suspicious_description",
+                                            reason=f"Suspicious description findings: {findings_str}",
+                                            tool=tool_name,
+                                            argument_keys=[],
+                                        ),
+                                        extra={"findings": findings},
+                                    )
+                        else:  # enforce mode
+                            quarantined_tools: Set[str] = set()
+                            for t_name, findings in findings_by_tool.items():
+                                if findings:
+                                    tool_pin = pins.get(t_name, {})
+                                    trusted_hash = tool_pin.get("trusted_sha256")
+                                    current_hash = self.tools.get(t_name, {}).get("sha256")
+                                    is_trusted = bool(
+                                        trusted_hash and current_hash and trusted_hash == current_hash
+                                    )
+                                    should_quarantine = bool(set(findings) & QUARANTINE_FINDINGS) and not is_trusted
+                                    if should_quarantine:
+                                        quarantined_tools.add(t_name)
+                                        self.tools.pop(t_name, None)
+                                        if self._should_log_findings(t_name, "quarantined", findings):
+                                            findings_str = ",".join(findings)
+                                            sys.stderr.write(
+                                                f"[mcp-guard] QUARANTINED tool={t_name} findings={findings_str}\n"
+                                            )
+                                            sys.stderr.flush()
+                                            self._log_audit(
+                                                Decision(
+                                                    allowed=False,
+                                                    rule="quarantined",
+                                                    reason=f"Suspicious description findings: {findings_str}",
+                                                    tool=t_name,
+                                                    argument_keys=[],
+                                                ),
+                                                extra={"findings": findings},
+                                            )
+                                    elif self._should_log_findings(t_name, "suspicious_description", findings):
+                                        findings_str = ",".join(findings)
+                                        sys.stderr.write(
+                                            f"[mcp-guard] SUSPICIOUS tool={t_name} findings={findings_str}\n"
+                                        )
+                                        sys.stderr.flush()
+                                        self._log_audit(
+                                            Decision(
+                                                allowed=True,
+                                                rule="suspicious_description",
+                                                reason=f"Suspicious description findings: {findings_str}",
+                                                tool=t_name,
+                                                argument_keys=[],
+                                            ),
+                                            extra={"findings": findings},
+                                        )
+
+                            if quarantined_tools:
+                                result["tools"] = [
+                                    t
+                                    for t in tools_list
+                                    if not (isinstance(t, dict) and t.get("name") in quarantined_tools)
+                                ]
+                                data["result"] = result
+                                self.has_manifest = True
+                                return (json.dumps(data) + "\n").encode("utf-8")
 
                     self.has_manifest = True
 

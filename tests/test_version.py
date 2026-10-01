@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import re
-import mcp_guard
+import mcp_integrity
 
 try:
     import tomllib
@@ -23,4 +23,4 @@ def test_version_matches_pyproject():
         assert match, "Could not find version in pyproject.toml"
         pyproject_version = match.group(1)
 
-    assert mcp_guard.__version__ == pyproject_version
+    assert mcp_integrity.__version__ == pyproject_version

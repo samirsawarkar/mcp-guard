@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from mcp_guard.scan import scan_description, scan_manifest
+from mcp_integrity.scan import scan_description, scan_manifest
 
 FIXTURES_DIR = Path(__file__).parent / "descriptions"
 

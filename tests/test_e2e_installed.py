@@ -10,10 +10,10 @@ import threading
 from typing import Any, Dict
 import pytest
 
-MCP_GUARD_BIN = os.environ.get("MCP_GUARD_BIN")
+MCP_INTEGRITY_BIN = os.environ.get("MCP_INTEGRITY_BIN")
 pytestmark = pytest.mark.skipif(
-    not MCP_GUARD_BIN,
-    reason="MCP_GUARD_BIN not set (requires installed mcp-guard binary)",
+    not MCP_INTEGRITY_BIN,
+    reason="MCP_INTEGRITY_BIN not set (requires installed mcp-integrity binary)",
 )
 
 
@@ -60,8 +60,8 @@ def test_e2e_real_user_workflow(tmp_path: Path):
     d) enforce blocks unlisted tool calls with -32001
     e) uninstall cleanly restores original config
     """
-    mcp_guard_bin = os.path.abspath(MCP_GUARD_BIN)
-    assert os.path.exists(mcp_guard_bin), f"MCP_GUARD_BIN does not exist: {mcp_guard_bin}"
+    mcp_integrity_bin = os.path.abspath(MCP_INTEGRITY_BIN)
+    assert os.path.exists(mcp_integrity_bin), f"MCP_INTEGRITY_BIN does not exist: {mcp_integrity_bin}"
 
     tmp_home = tmp_path / "home"
     tmp_guard_home = tmp_path / "guard_home"
@@ -91,12 +91,12 @@ def test_e2e_real_user_workflow(tmp_path: Path):
 
     cli_env = {
         "HOME": str(tmp_home),
-        "MCP_GUARD_HOME": str(tmp_guard_home),
+        "MCP_INTEGRITY_HOME": str(tmp_guard_home),
         "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
     }
 
-    # a) $MCP_GUARD_BIN init -> exit 0; config entry command is absolute and exists; .bak created
-    res_init = subprocess.run([mcp_guard_bin, "init"], env=cli_env, capture_output=True, text=True)
+    # a) $MCP_INTEGRITY_BIN init -> exit 0; config entry command is absolute and exists; .bak created
+    res_init = subprocess.run([mcp_integrity_bin, "init"], env=cli_env, capture_output=True, text=True)
     assert res_init.returncode == 0, f"init failed: stdout={res_init.stdout}, stderr={res_init.stderr}"
 
     init_cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
@@ -105,15 +105,15 @@ def test_e2e_real_user_workflow(tmp_path: Path):
     assert cmd_path.is_absolute(), f"command is not absolute: {cmd_path}"
     assert cmd_path.exists(), f"command does not exist: {cmd_path}"
 
-    bak_path = Path(f"{cfg_path}.mcp-guard.bak")
-    assert bak_path.exists(), "Backup .mcp-guard.bak was not created"
+    bak_path = Path(f"{cfg_path}.mcp-integrity.bak")
+    assert bak_path.exists(), "Backup .mcp-integrity.bak was not created"
     assert json.loads(bak_path.read_text(encoding="utf-8")) == original_config
 
     # b) Restart simulation: spawn wrapped server exactly as client would
     # GUI clients do not inherit shell PATH, so use PATH=/usr/bin:/bin
     spawn_env = {
         "HOME": str(tmp_home),
-        "MCP_GUARD_HOME": str(tmp_guard_home),
+        "MCP_INTEGRITY_HOME": str(tmp_guard_home),
         "PATH": "/usr/bin:/bin",
     }
     spawn_cmd = [srv_entry["command"], *srv_entry.get("args", [])]
@@ -167,14 +167,14 @@ def test_e2e_real_user_workflow(tmp_path: Path):
             proc.stdin.close()
         proc.wait(timeout=5.0)
 
-    # c) $MCP_GUARD_BIN status -> contains "protected (1): Claude Desktop/<name>" and "last 24h: 1 calls"
-    res_status = subprocess.run([mcp_guard_bin, "status"], env=cli_env, capture_output=True, text=True)
+    # c) $MCP_INTEGRITY_BIN status -> contains "protected (1): Claude Desktop/<name>" and "last 24h: 1 calls"
+    res_status = subprocess.run([mcp_integrity_bin, "status"], env=cli_env, capture_output=True, text=True)
     assert res_status.returncode == 0, f"status failed: {res_status.stderr}"
     assert "protected (1): Claude Desktop/demo_server" in res_status.stdout
     assert "last 24h: 1 calls" in res_status.stdout
 
-    # d) $MCP_GUARD_BIN enforce -> exit 0, config args contain "--mode","enforce".
-    res_enforce = subprocess.run([mcp_guard_bin, "enforce"], env=cli_env, capture_output=True, text=True)
+    # d) $MCP_INTEGRITY_BIN enforce -> exit 0, config args contain "--mode","enforce".
+    res_enforce = subprocess.run([mcp_integrity_bin, "enforce"], env=cli_env, capture_output=True, text=True)
     assert res_enforce.returncode == 0, f"enforce failed: {res_enforce.stderr}"
 
     enforce_cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
@@ -221,8 +221,8 @@ def test_e2e_real_user_workflow(tmp_path: Path):
             proc_enforce.stdin.close()
         proc_enforce.wait(timeout=5.0)
 
-    # e) $MCP_GUARD_BIN uninstall -> exit 0; config JSON equals original (parsed-equal)
-    res_uninstall = subprocess.run([mcp_guard_bin, "uninstall"], env=cli_env, capture_output=True, text=True)
+    # e) $MCP_INTEGRITY_BIN uninstall -> exit 0; config JSON equals original (parsed-equal)
+    res_uninstall = subprocess.run([mcp_integrity_bin, "uninstall"], env=cli_env, capture_output=True, text=True)
     assert res_uninstall.returncode == 0, f"uninstall failed: {res_uninstall.stderr}"
 
     final_cfg = json.loads(cfg_path.read_text(encoding="utf-8"))

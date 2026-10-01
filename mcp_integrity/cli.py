@@ -11,8 +11,8 @@ import sys
 import time
 from typing import Sequence
 
-from mcp_guard import __version__
-from mcp_guard.clients import (
+from mcp_integrity import __version__
+from mcp_integrity.clients import (
     discover_configs,
     find_server_entries,
     format_display_path,
@@ -24,14 +24,14 @@ from mcp_guard.clients import (
     wrap_server_entry,
     write_json_atomic,
 )
-from mcp_guard.config import get_config_mode, get_guard_home, set_config_mode
-from mcp_guard.guard import Guard, accept_pin, pin_key, trust_pin
-from mcp_guard.proxy import run_proxy
+from mcp_integrity.config import get_config_mode, get_guard_home, set_config_mode
+from mcp_integrity.guard import Guard, accept_pin, pin_key, trust_pin
+from mcp_integrity.proxy import run_proxy
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        prog="mcp-guard",
+        prog="mcp-integrity",
         description="Transparent stdio MCP proxy and security guard",
     )
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
@@ -42,7 +42,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     run_parser.add_argument("--mode", choices=["audit", "enforce"], default="audit", help="Guard mode: audit (default) or enforce")
     run_parser.add_argument("--audit-log", metavar="PATH", default=None, help="Path to audit log file")
     run_parser.add_argument("--name", metavar="LABEL", default=None, help="Server label for audit log")
-    run_parser.add_argument("--home", metavar="PATH", default=None, help="State directory (default: ~/.mcp-guard)")
+    run_parser.add_argument("--home", metavar="PATH", default=None, help="State directory (default: ~/.mcp-integrity)")
     run_parser.add_argument("server_command", nargs=argparse.REMAINDER, help="Server command after --")
 
     # 2. init
@@ -90,7 +90,7 @@ def handle_run(args: argparse.Namespace) -> int:
     if cmd and cmd[0] == "--":
         cmd = cmd[1:]
     if not cmd:
-        sys.stderr.write("mcp-guard: error: server command required after --\n")
+        sys.stderr.write("mcp-integrity: error: server command required after --\n")
         sys.stderr.flush()
         return 2
 
@@ -102,7 +102,7 @@ def handle_run(args: argparse.Namespace) -> int:
             stderr=None,  # Server stderr -> our stderr unchanged
         )
     except Exception as exc:
-        sys.stderr.write(f"mcp-guard: failed to spawn {cmd[0]}: {exc}\n")
+        sys.stderr.write(f"mcp-integrity: failed to spawn {cmd[0]}: {exc}\n")
         sys.stderr.flush()
         return 1
 
@@ -125,28 +125,28 @@ def handle_init(args: argparse.Namespace) -> int:
     home = get_guard_home(args.home)
     discovered = discover_configs(client_filter=args.client)
     if not discovered:
-        sys.stderr.write("mcp-guard: no client configs found. Looked in:\n")
+        sys.stderr.write("mcp-integrity: no client configs found. Looked in:\n")
         for client_name, path in get_known_client_locations():
             sys.stderr.write(f"  - {client_name}: {format_display_path(path)}\n")
         sys.stderr.flush()
         return 1
 
-    # Detect mcp-guard path
-    mcp_guard_which = shutil.which("mcp-guard")
-    if mcp_guard_which:
-        mcp_guard_cmd = os.path.abspath(mcp_guard_which)
+    # Detect mcp-integrity path
+    mcp_integrity_which = shutil.which("mcp-integrity")
+    if mcp_integrity_which:
+        mcp_integrity_cmd = os.path.abspath(mcp_integrity_which)
     else:
         resolved_argv0 = Path(sys.argv[0]).resolve()
-        if "mcp-guard" in resolved_argv0.name:
-            mcp_guard_cmd = str(resolved_argv0)
+        if "mcp-integrity" in resolved_argv0.name:
+            mcp_integrity_cmd = str(resolved_argv0)
         else:
-            venv_script = Path(sys.prefix) / "bin" / "mcp-guard"
+            venv_script = Path(sys.prefix) / "bin" / "mcp-integrity"
             if venv_script.exists():
-                mcp_guard_cmd = str(venv_script.resolve())
+                mcp_integrity_cmd = str(venv_script.resolve())
             else:
-                mcp_guard_cmd = str(resolved_argv0)
+                mcp_integrity_cmd = str(resolved_argv0)
 
-    print(f"using {mcp_guard_cmd}")
+    print(f"using {mcp_integrity_cmd}")
 
     mode = args.mode or "audit"
     total_protected = 0
@@ -159,7 +159,7 @@ def handle_init(args: argparse.Namespace) -> int:
             if not isinstance(data, dict):
                 raise ValueError("config root must be a JSON object")
         except Exception as e:
-            sys.stderr.write(f"mcp-guard: error: {format_display_path(config_path)}: {e}\n")
+            sys.stderr.write(f"mcp-integrity: error: {format_display_path(config_path)}: {e}\n")
             has_errors = True
             continue
 
@@ -167,7 +167,7 @@ def handle_init(args: argparse.Namespace) -> int:
         if not entries:
             continue
 
-        bak_file = Path(f"{config_path}.mcp-guard.bak")
+        bak_file = Path(f"{config_path}.mcp-integrity.bak")
         modified = False
 
         print(f"{client_name}  {format_display_path(config_path)}")
@@ -180,7 +180,7 @@ def handle_init(args: argparse.Namespace) -> int:
             else:
                 if not modified and not bak_file.exists():
                     shutil.copy2(config_path, bak_file)
-                wrap_server_entry(entry.data, entry.name, mode, mcp_guard_cmd)
+                wrap_server_entry(entry.data, entry.name, mode, mcp_integrity_cmd)
                 modified = True
                 total_protected += 1
                 print(f"  wrapped   {entry.name}")
@@ -189,11 +189,11 @@ def handle_init(args: argparse.Namespace) -> int:
             try:
                 write_json_atomic(config_path, data)
             except Exception as e:
-                sys.stderr.write(f"mcp-guard: error: {format_display_path(config_path)}: {e}\n")
+                sys.stderr.write(f"mcp-integrity: error: {format_display_path(config_path)}: {e}\n")
                 has_errors = True
 
     set_config_mode(mode, home=home)
-    print(f"{total_protected} servers protected in {mode} mode. Restart your client. Then: mcp-guard status")
+    print(f"{total_protected} servers protected in {mode} mode. Restart your client. Then: mcp-integrity status")
     return 1 if has_errors else 0
 
 
@@ -209,7 +209,7 @@ def handle_uninstall(args: argparse.Namespace) -> int:
             if not isinstance(data, dict):
                 raise ValueError("config root must be a JSON object")
         except Exception as e:
-            sys.stderr.write(f"mcp-guard: error: {format_display_path(config_path)}: {e}\n")
+            sys.stderr.write(f"mcp-integrity: error: {format_display_path(config_path)}: {e}\n")
             has_errors = True
             continue
 
@@ -231,7 +231,7 @@ def handle_uninstall(args: argparse.Namespace) -> int:
             try:
                 write_json_atomic(config_path, data)
             except Exception as e:
-                sys.stderr.write(f"mcp-guard: error: {format_display_path(config_path)}: {e}\n")
+                sys.stderr.write(f"mcp-integrity: error: {format_display_path(config_path)}: {e}\n")
                 has_errors = True
 
     print(f"{total_unwrapped} servers restored to original configuration. Restart your client.")
@@ -251,7 +251,7 @@ def handle_mode_switch(new_mode: str, home_override: Path | str | None = None) -
             if not isinstance(data, dict):
                 raise ValueError("config root must be a JSON object")
         except Exception as e:
-            sys.stderr.write(f"mcp-guard: error: {format_display_path(config_path)}: {e}\n")
+            sys.stderr.write(f"mcp-integrity: error: {format_display_path(config_path)}: {e}\n")
             has_errors = True
             continue
 
@@ -267,7 +267,7 @@ def handle_mode_switch(new_mode: str, home_override: Path | str | None = None) -
             try:
                 write_json_atomic(config_path, data)
             except Exception as e:
-                sys.stderr.write(f"mcp-guard: error: {format_display_path(config_path)}: {e}\n")
+                sys.stderr.write(f"mcp-integrity: error: {format_display_path(config_path)}: {e}\n")
                 has_errors = True
 
     set_config_mode(new_mode, home=home)
@@ -279,9 +279,9 @@ def handle_status(args: argparse.Namespace) -> int:
     home = get_guard_home(args.home)
     mode = get_config_mode(home=home)
     mode_desc = (
-        "nothing is blocked; run 'mcp-guard enforce' to block"
+        "nothing is blocked; run 'mcp-integrity enforce' to block"
         if mode == "audit"
-        else "policy violations are blocked; run 'mcp-guard audit' to unblock"
+        else "policy violations are blocked; run 'mcp-integrity audit' to unblock"
     )
     print(f"mode: {mode} ({mode_desc})")
 
@@ -316,9 +316,9 @@ def handle_status(args: argparse.Namespace) -> int:
         if protected:
             print(f"protected ({len(protected)}): {', '.join(sorted(protected))}")
         if unprotected:
-            print(f"unprotected ({len(unprotected)}): {', '.join(sorted(unprotected))}   run 'mcp-guard init' to protect")
+            print(f"unprotected ({len(unprotected)}): {', '.join(sorted(unprotected))}   run 'mcp-integrity init' to protect")
         if broken:
-            print(f"broken ({len(broken)}): {', '.join(sorted(broken))}   launcher not found; re-run 'mcp-guard init'")
+            print(f"broken ({len(broken)}): {', '.join(sorted(broken))}   launcher not found; re-run 'mcp-integrity init'")
         if remote:
             print(f"remote, not covered ({len(remote)}): {', '.join(sorted(remote))}")
 
@@ -418,7 +418,7 @@ def handle_log(args: argparse.Namespace) -> int:
     home = get_guard_home(args.home)
     audit_file = home / "audit.jsonl"
     if not audit_file.exists():
-        sys.stderr.write("mcp-guard: no audit log found\n")
+        sys.stderr.write("mcp-integrity: no audit log found\n")
         return 1
 
     def print_entry(line_str: str) -> None:
@@ -496,13 +496,13 @@ def handle_pin(args: argparse.Namespace) -> int:
         ok = trust_pin(server_name, tool_name, pins_dir=pins_dir, home=home)
         if ok:
             sys.stderr.write(
-                f"[mcp-guard] Trusted tool '{tool_name}' on server '{server_name}'\n"
+                f"[mcp-integrity] Trusted tool '{tool_name}' on server '{server_name}'\n"
             )
             sys.stderr.flush()
             return 0
         else:
             sys.stderr.write(
-                f"mcp-guard: failed to trust tool '{tool_name}' on server '{server_name}' (server pin or tool missing)\n"
+                f"mcp-integrity: failed to trust tool '{tool_name}' on server '{server_name}' (server pin or tool missing)\n"
             )
             sys.stderr.flush()
             return 1
@@ -512,13 +512,13 @@ def handle_pin(args: argparse.Namespace) -> int:
         ok = accept_pin(server_name, tool_name, pins_dir=pins_dir, home=home)
         if ok:
             sys.stderr.write(
-                f"[mcp-guard] Accepted updated hash for tool '{tool_name}' on server '{server_name}'\n"
+                f"[mcp-integrity] Accepted updated hash for tool '{tool_name}' on server '{server_name}'\n"
             )
             sys.stderr.flush()
             return 0
         else:
             sys.stderr.write(
-                f"mcp-guard: failed to accept pin for tool '{tool_name}' on server '{server_name}' (no observed change or server pin missing)\n"
+                f"mcp-integrity: failed to accept pin for tool '{tool_name}' on server '{server_name}' (no observed change or server pin missing)\n"
             )
             sys.stderr.flush()
             return 1

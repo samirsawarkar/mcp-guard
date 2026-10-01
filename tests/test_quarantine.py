@@ -7,8 +7,8 @@ import sys
 
 import pytest
 
-from mcp_guard.cli import handle_pin, handle_status, parse_args
-from mcp_guard.guard import Guard, trust_pin
+from mcp_integrity.cli import handle_pin, handle_status, parse_args
+from mcp_integrity.guard import Guard, trust_pin
 
 
 def test_enforce_removes_poisoned_tool_and_call_gets_unknown_tool(tmp_path: Path):
@@ -419,7 +419,7 @@ def test_enforce_cross_tool_reference_is_warning_only_not_quarantined(tmp_path: 
 
     # Warning on stderr
     captured = capsys.readouterr()
-    assert "[mcp-guard] SUSPICIOUS tool=tool_a findings=cross_tool_reference" in captured.err
+    assert "[mcp-integrity] SUSPICIOUS tool=tool_a findings=cross_tool_reference" in captured.err
 
     # Audit log has suspicious_description with allowed=True
     entries = [json.loads(line) for line in audit_file.read_text(encoding="utf-8").strip().splitlines()]
@@ -478,7 +478,7 @@ def test_enforce_tool_with_hidden_instruction_and_cross_tool_is_quarantined(tmp_
     assert "tool_a" not in guard.tools
 
     captured = capsys.readouterr()
-    assert "[mcp-guard] QUARANTINED tool=tool_a" in captured.err
+    assert "[mcp-integrity] QUARANTINED tool=tool_a" in captured.err
 
     entries = [json.loads(line) for line in audit_file.read_text(encoding="utf-8").strip().splitlines()]
     q_entries = [e for e in entries if e.get("rule") == "quarantined"]

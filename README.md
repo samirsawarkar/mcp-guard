@@ -1,25 +1,25 @@
-# mcp-guard
+# mcp-integrity
 
 [![CI](https://github.com/samirsawarkar/mcp-guard/actions/workflows/ci.yml/badge.svg)](https://github.com/samirsawarkar/mcp-guard/actions)
-[![PyPI](https://img.shields.io/pypi/v/mcp-guard.svg)](https://pypi.org/project/mcp-guard/)
+[![PyPI](https://img.shields.io/pypi/v/mcp-integrity.svg)](https://pypi.org/project/mcp-integrity/)
 
-mcp-guard is a local integrity monitor for stdio MCP servers. It sits between your AI client and your servers, logs every tool call (argument names only), scans tool descriptions for poisoning, pins tool definitions to catch silent changes, and in enforce mode blocks calls that break the rules.
+mcp-integrity is a local integrity monitor for stdio MCP servers. It sits between your AI client and your servers, logs every tool call (argument names only), scans tool descriptions for poisoning, pins tool definitions to catch silent changes, and in enforce mode blocks calls that break the rules.
 
 ## 30-second install
 
 Requires Python 3.10 or newer and an existing stdio MCP server configured in your client. This release is tested on macOS and Linux. Windows has not been validated.
 
 ```bash
-pip install mcp-guard
-mcp-guard init
+pip install mcp-integrity
+mcp-integrity init
 ```
 
 If your Python installation refuses package installation into the system environment, use a virtual environment:
 
 ```bash
-python3 -m venv ~/.venvs/mcp-guard
-~/.venvs/mcp-guard/bin/pip install mcp-guard
-~/.venvs/mcp-guard/bin/mcp-guard init
+python3 -m venv ~/.venvs/mcp-integrity
+~/.venvs/mcp-integrity/bin/pip install mcp-integrity
+~/.venvs/mcp-integrity/bin/mcp-integrity init
 ```
 
 Keep that environment installed: the client configuration uses its absolute launcher path. Use the same launcher for `status`, `enforce`, and other commands.
@@ -27,11 +27,11 @@ Keep that environment installed: the client configuration uses its absolute laun
 Restart your MCP client (for example, Claude Desktop or Cursor).
 
 ```bash
-mcp-guard status
+mcp-integrity status
 ```
 
 ```text
-mode: audit (nothing is blocked; run 'mcp-guard enforce' to block)
+mode: audit (nothing is blocked; run 'mcp-integrity enforce' to block)
 protected (3): Claude Desktop/filesystem, Claude Desktop/github, Claude Desktop/postgres
 last 24h: 142 calls, 1 would-block, 1 suspicious description, 0 changed tools, 0 quarantined
 would block:
@@ -56,18 +56,18 @@ changed tools: none
 
 ## Audit mode vs enforce mode
 
-Default is audit: nothing changes for you, you just get a log. Run `mcp-guard enforce` to block rule violations with an MCP error response. In enforce mode, tools with a high-confidence scanner finding are also quarantined: removed from tools/list so the model never sees them. Use `mcp-guard pin --trust <server> <tool>` for a clean tool that got removed. Run `mcp-guard audit` to go back. Restart your client after either mode change so its server processes use the new mode.
+Default is audit: nothing changes for you, you just get a log. Run `mcp-integrity enforce` to block rule violations with an MCP error response. In enforce mode, tools with a high-confidence scanner finding are also quarantined: removed from tools/list so the model never sees them. Use `mcp-integrity pin --trust <server> <tool>` for a clean tool that got removed. Run `mcp-integrity audit` to go back. Restart your client after either mode change so its server processes use the new mode.
 
 ## What it does NOT do
 
 - Does not see your chat messages, so it cannot check whether a tool call's arguments match what you asked (that check exists in the underlying research but needs the user turn; coming as a library API for people who run their own agent loop).
 - Does not inspect tool RESULTS.
 - Does not protect remote (HTTP/SSE) servers yet.
-- The heuristic scanner can miss poisoned tools (about 30% on MCPTox) and can remove clean ones (0.8% of clean tools on MCPTox). Use `mcp-guard pin --trust <server> <tool>` for a clean tool it removed.
+- The heuristic scanner can miss poisoned tools (about 30% on MCPTox) and can remove clean ones (0.8% of clean tools on MCPTox). Use `mcp-integrity pin --trust <server> <tool>` for a clean tool it removed.
 
 ## Measured on MCPTox
 
-We ran mcp-guard's own rules over MCPTox, a public tool-poisoning benchmark (1,312 poisoned tools on 45 real MCP servers, 10,227 recorded model responses labelled by the benchmark authors). $0, no model calls. Script: `bench/mcptox_bench.py`, results: `bench/results_mcptox.json`.
+We ran mcp-integrity's own rules over MCPTox, a public tool-poisoning benchmark (1,312 poisoned tools on 45 real MCP servers, 10,227 recorded model responses labelled by the benchmark authors). $0, no model calls. Script: `bench/mcptox_bench.py`, results: `bench/results_mcptox.json`.
 
 | Check | Result | 95% CI |
 | --- | --- | --- |
@@ -95,28 +95,28 @@ Needs the MCPTox data file from inspect-evals-mcptox (default path ~/Library/Cac
 
 ## Where things live
 
-- `~/.mcp-guard/audit.jsonl`: Audit log containing argument NAMES only, never values.
-- `~/.mcp-guard/pins/`: Pinned tool schema and description hashes per server to detect rug-pulls.
-- `<file>.mcp-guard.bak`: Backup created next to each client config file on first wrap.
+- `~/.mcp-integrity/audit.jsonl`: Audit log containing argument NAMES only, never values.
+- `~/.mcp-integrity/pins/`: Pinned tool schema and description hashes per server to detect rug-pulls.
+- `<file>.mcp-integrity.bak`: Backup created next to each client config file on first wrap.
 
-`mcp-guard uninstall` restores everything.
+`mcp-integrity uninstall` restores everything.
 
 ## All commands
 
-- `mcp-guard init`: Finds client configs and wraps stdio MCP servers in audit mode.
-- `mcp-guard status`: Shows protection mode, which servers are protected, unprotected, broken, or remote, 24h call counts, would-blocks, and warnings.
-- `mcp-guard log`: Displays audit log entries in `<time> <server> <tool> <rule>` format; supports `--tail N` and `--follow`.
-- `mcp-guard enforce`: Switches all wrapped servers to enforce mode.
-- `mcp-guard audit`: Switches all wrapped servers to audit mode.
-- `mcp-guard pin --list` / `--accept` / `--trust`: Lists pinned tool statuses, accepts updated hashes after a legitimate tool change, or trusts a tool to bypass quarantine.
-- `mcp-guard uninstall`: Restores all wrapped client configs to their original unwrapped commands.
-- `mcp-guard run`: Wraps a single server by hand (`mcp-guard run -- <server_command>`).
+- `mcp-integrity init`: Finds client configs and wraps stdio MCP servers in audit mode.
+- `mcp-integrity status`: Shows protection mode, which servers are protected, unprotected, broken, or remote, 24h call counts, would-blocks, and warnings.
+- `mcp-integrity log`: Displays audit log entries in `<time> <server> <tool> <rule>` format; supports `--tail N` and `--follow`.
+- `mcp-integrity enforce`: Switches all wrapped servers to enforce mode.
+- `mcp-integrity audit`: Switches all wrapped servers to audit mode.
+- `mcp-integrity pin --list` / `--accept` / `--trust`: Lists pinned tool statuses, accepts updated hashes after a legitimate tool change, or trusts a tool to bypass quarantine.
+- `mcp-integrity uninstall`: Restores all wrapped client configs to their original unwrapped commands.
+- `mcp-integrity run`: Wraps a single server by hand (`mcp-integrity run -- <server_command>`).
 
-For `pin --trust` and `pin --accept`, use the exact server key printed by `mcp-guard pin --list` (for example, `filesystem-012345abcdef`), plus the tool name. Restart the server or client after trusting or accepting a tool so it refreshes tools/list. Trust applies only to the specific tool hash; a later description or schema change still requires review.
+For `pin --trust` and `pin --accept`, use the exact server key printed by `mcp-integrity pin --list` (for example, `filesystem-012345abcdef`), plus the tool name. Restart the server or client after trusting or accepting a tool so it refreshes tools/list. Trust applies only to the specific tool hash; a later description or schema change still requires review.
 
 ## Why
 
-Built from FAULTLINE's P8 study (https://github.com/samirsawarkar/faultline-ai-reliability). There, a client-side contract cut MCPTox attack success from 30% to 7% across six models, mostly through a rule that checks each argument against the user's own message. A proxy never sees that message, so mcp-guard ships the parts that do not need it. The numbers above are mcp-guard's own, not P8's.
+Built from FAULTLINE's P8 study (https://github.com/samirsawarkar/faultline-ai-reliability). There, a client-side contract cut MCPTox attack success from 30% to 7% across six models, mostly through a rule that checks each argument against the user's own message. A proxy never sees that message, so mcp-integrity ships the parts that do not need it. The numbers above are mcp-integrity's own, not P8's.
 
 ## License
 

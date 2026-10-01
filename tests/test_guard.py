@@ -7,7 +7,7 @@ import subprocess
 import sys
 
 import pytest
-from mcp_guard.guard import Guard, accept_pin, pin_key
+from mcp_integrity.guard import Guard, accept_pin, pin_key
 
 FAKE_SERVER_PATH = Path(__file__).parent / "fake_server.py"
 
@@ -240,7 +240,7 @@ def test_enforce_mode_denied_call_blocks_and_replies_error(tmp_path: Path):
     assert err_resp["jsonrpc"] == "2.0"
     assert err_resp["id"] == "req-block-1"
     assert err_resp["error"]["code"] == -32001
-    assert "mcp-guard blocked: unknown_tool" in err_resp["error"]["message"]
+    assert "mcp-integrity blocked: unknown_tool" in err_resp["error"]["message"]
 
 
 def test_audit_log_fields_and_malformed_json(tmp_path: Path):
@@ -475,7 +475,7 @@ def test_enforce_blocks_delete_everything_subprocess(tmp_path: Path):
     cmd = [
         sys.executable,
         "-m",
-        "mcp_guard.cli",
+        "mcp_integrity.cli",
         "run",
         "--mode",
         "enforce",
@@ -522,7 +522,7 @@ def test_enforce_blocks_delete_everything_subprocess(tmp_path: Path):
     err_resp = json.loads(err_line.decode("utf-8"))
     assert err_resp["id"] == 3
     assert err_resp["error"]["code"] == -32001
-    assert "mcp-guard blocked: unknown_tool" in err_resp["error"]["message"]
+    assert "mcp-integrity blocked: unknown_tool" in err_resp["error"]["message"]
 
     # 4. Call valid tool: search (to verify server is alive and inspect received calls)
     proc.stdin.write(b'{"jsonrpc": "2.0", "id": 4, "method": "tools/call", "params": {"name": "search", "arguments": {"query": "hello"}}}\n')
@@ -580,7 +580,7 @@ def test_suspicious_description_scanner_logs_and_warns(tmp_path: Path, capsys):
 
     # Check stderr
     captured = capsys.readouterr()
-    assert "[mcp-guard] SUSPICIOUS tool=poisoned_tool" in captured.err
+    assert "[mcp-integrity] SUSPICIOUS tool=poisoned_tool" in captured.err
     assert "hidden_instruction" in captured.err
     assert "sensitive_path" in captured.err
 
@@ -664,7 +664,7 @@ def test_accept_pin_allows_legitimate_double_dot(tmp_path: Path):
 
 
 def test_run_pins_under_home_not_next_to_interpreter(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    """mcp-guard run -- <absolute path to python> tests/fake_server.py (no --name) with MCP_GUARD_HOME=tmp:
+    """mcp-integrity run -- <absolute path to python> tests/fake_server.py (no --name) with MCP_INTEGRITY_HOME=tmp:
     after a tools/list, exactly one pin file exists under tmp/pins and nothing was written next to the interpreter.
     """
     python_bin = sys.executable
@@ -672,12 +672,12 @@ def test_run_pins_under_home_not_next_to_interpreter(tmp_path: Path, monkeypatch
     interpreter_sibling = Path(python_bin).parent / f"{Path(python_bin).name}.json"
     sibling_existed_before = interpreter_sibling.exists()
 
-    monkeypatch.setenv("MCP_GUARD_HOME", str(tmp_path))
+    monkeypatch.setenv("MCP_INTEGRITY_HOME", str(tmp_path))
 
     cmd = [
         python_bin,
         "-m",
-        "mcp_guard.cli",
+        "mcp_integrity.cli",
         "run",
         "--home",
         str(tmp_path),

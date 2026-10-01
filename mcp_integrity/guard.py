@@ -9,7 +9,7 @@ import re
 import sys
 from typing import Any, Callable, Dict, List, Set, Tuple
 
-from mcp_guard.scan import scan_manifest
+from mcp_integrity.scan import scan_manifest
 
 
 @dataclass(frozen=True)
@@ -29,8 +29,8 @@ QUARANTINE_FINDINGS: frozenset[str] = frozenset({
 })
 
 
-from mcp_guard.clients import write_json_atomic
-from mcp_guard.config import get_guard_home
+from mcp_integrity.clients import write_json_atomic
+from mcp_integrity.config import get_guard_home
 
 
 def _sanitize_label(label: str) -> str:
@@ -281,7 +281,7 @@ class Guard:
             if not decision.allowed:
                 if self.mode == "enforce":
                     sys.stderr.write(
-                        f"[mcp-guard] BLOCKED tool={decision.tool} rule={decision.rule} {decision.reason}\n"
+                        f"[mcp-integrity] BLOCKED tool={decision.tool} rule={decision.rule} {decision.reason}\n"
                     )
                     sys.stderr.flush()
                     if self.reply is not None:
@@ -290,14 +290,14 @@ class Guard:
                             "id": req_id,
                             "error": {
                                 "code": -32001,
-                                "message": f"mcp-guard blocked: {decision.rule}: {decision.reason}",
+                                "message": f"mcp-integrity blocked: {decision.rule}: {decision.reason}",
                             },
                         }
                         self.reply(json.dumps(err_resp).encode("utf-8") + b"\n")
                     return None
                 else:  # audit mode
                     sys.stderr.write(
-                        f"[mcp-guard] WOULD BLOCK tool={decision.tool} rule={decision.rule} {decision.reason}\n"
+                        f"[mcp-integrity] WOULD BLOCK tool={decision.tool} rule={decision.rule} {decision.reason}\n"
                     )
                     sys.stderr.flush()
                     return line
@@ -389,7 +389,7 @@ class Guard:
                                         pins[name]["observed_at"] = datetime.now(timezone.utc).isoformat()
                                         pins_updated = True
                                         reason = f"tool {name} description/schema changed since {first_seen}"
-                                        sys.stderr.write(f"[mcp-guard] CHANGED tool={name} {reason}\n")
+                                        sys.stderr.write(f"[mcp-integrity] CHANGED tool={name} {reason}\n")
                                         sys.stderr.flush()
                                         self._log_audit(
                                             Decision(
@@ -417,7 +417,7 @@ class Guard:
                                 if findings and self._should_log_findings(tool_name, "suspicious_description", findings):
                                     findings_str = ",".join(findings)
                                     sys.stderr.write(
-                                        f"[mcp-guard] SUSPICIOUS tool={tool_name} findings={findings_str}\n"
+                                        f"[mcp-integrity] SUSPICIOUS tool={tool_name} findings={findings_str}\n"
                                     )
                                     sys.stderr.flush()
                                     self._log_audit(
@@ -447,7 +447,7 @@ class Guard:
                                         if self._should_log_findings(t_name, "quarantined", findings):
                                             findings_str = ",".join(findings)
                                             sys.stderr.write(
-                                                f"[mcp-guard] QUARANTINED tool={t_name} findings={findings_str}\n"
+                                                f"[mcp-integrity] QUARANTINED tool={t_name} findings={findings_str}\n"
                                             )
                                             sys.stderr.flush()
                                             self._log_audit(
@@ -463,7 +463,7 @@ class Guard:
                                     elif self._should_log_findings(t_name, "suspicious_description", findings):
                                         findings_str = ",".join(findings)
                                         sys.stderr.write(
-                                            f"[mcp-guard] SUSPICIOUS tool={t_name} findings={findings_str}\n"
+                                            f"[mcp-integrity] SUSPICIOUS tool={t_name} findings={findings_str}\n"
                                         )
                                         sys.stderr.flush()
                                         self._log_audit(

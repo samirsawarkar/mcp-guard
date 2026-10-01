@@ -192,15 +192,15 @@ def is_wrapped_server(server_data: Dict[str, Any]) -> bool:
     args = server_data.get("args")
     if not isinstance(args, list):
         return False
-    is_mcp_guard_cmd = (cmd == "mcp-guard" or Path(cmd).name == "mcp-guard")
-    return is_mcp_guard_cmd and ("run" in args and "--" in args)
+    is_mcp_integrity_cmd = (cmd == "mcp-integrity" or Path(cmd).name == "mcp-integrity")
+    return is_mcp_integrity_cmd and ("run" in args and "--" in args)
 
 
 def wrap_server_entry(
     server_data: Dict[str, Any],
     server_name: str,
     mode: str,
-    mcp_guard_cmd: str,
+    mcp_integrity_cmd: str,
 ) -> bool:
     if is_remote_server(server_data) or is_wrapped_server(server_data):
         return False
@@ -210,7 +210,7 @@ def wrap_server_entry(
     if not isinstance(orig_args, list):
         orig_args = []
 
-    server_data["command"] = mcp_guard_cmd
+    server_data["command"] = mcp_integrity_cmd
     server_data["args"] = [
         "run",
         "--name",

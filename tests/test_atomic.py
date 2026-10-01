@@ -6,9 +6,9 @@ from pathlib import Path
 import stat
 import pytest
 
-from mcp_guard.cli import main
-from mcp_guard.clients import write_json_atomic
-from mcp_guard.guard import accept_pin
+from mcp_integrity.cli import main
+from mcp_integrity.clients import write_json_atomic
+from mcp_integrity.guard import accept_pin
 
 
 def test_write_json_atomic_roundtrip_permissions_and_symlink(tmp_path: Path):
@@ -122,19 +122,19 @@ def test_init_valid_and_invalid_json_configs(
 
     out, err = capsys.readouterr()
     # Error line printed on stderr
-    assert "mcp-guard: error:" in err
+    assert "mcp-integrity: error:" in err
     assert "mcp.json" in err
 
     # Valid config was wrapped
     valid_data = json.loads(valid_cfg.read_text(encoding="utf-8"))
     srv = valid_data["mcpServers"]["demo_srv"]
-    assert "mcp-guard" in srv["command"]
+    assert "mcp-integrity" in srv["command"]
     assert "wrapped   demo_srv" in out
 
     # Invalid config is byte-identical
     assert invalid_cfg.read_bytes() == invalid_bytes
     # No .bak created for invalid config
-    assert not Path(f"{invalid_cfg}.mcp-guard.bak").exists()
+    assert not Path(f"{invalid_cfg}.mcp-integrity.bak").exists()
 
 
 def test_uninstall_and_enforce_with_invalid_json_config(
@@ -156,14 +156,14 @@ def test_uninstall_and_enforce_with_invalid_json_config(
     assert rc_un == 1
     assert invalid_cfg.read_bytes() == invalid_bytes
     _, err_un = capsys.readouterr()
-    assert "mcp-guard: error:" in err_un
+    assert "mcp-integrity: error:" in err_un
 
     # 2. Test enforce
     rc_enf = main(["enforce"])
     assert rc_enf == 1
     assert invalid_cfg.read_bytes() == invalid_bytes
     _, err_enf = capsys.readouterr()
-    assert "mcp-guard: error:" in err_enf
+    assert "mcp-integrity: error:" in err_enf
 
 
 def test_accept_pin_legitimate_double_dot_and_path_traversal(tmp_path: Path):

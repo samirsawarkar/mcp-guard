@@ -7,9 +7,9 @@ from pathlib import Path
 import sys
 import pytest
 
-from mcp_guard.cli import main
-from mcp_guard.clients import is_wrapped_server
-from mcp_guard.config import get_guard_home
+from mcp_integrity.cli import main
+from mcp_integrity.clients import is_wrapped_server
+from mcp_integrity.config import get_guard_home
 
 
 def test_init_fake_claude_desktop(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture):
@@ -52,7 +52,7 @@ def test_init_fake_claude_desktop(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
     assert "2 servers protected in audit mode" in out
 
     # Verify .bak
-    bak_file = Path(f"{cfg_file}.mcp-guard.bak")
+    bak_file = Path(f"{cfg_file}.mcp-integrity.bak")
     assert bak_file.exists()
     assert bak_file.read_bytes() == original_bytes
 
@@ -63,7 +63,7 @@ def test_init_fake_claude_desktop(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
     lin_srv = data["mcpServers"]["linear"]
 
     # filesystem wrapped
-    assert "mcp-guard" in fs_srv["command"]
+    assert "mcp-integrity" in fs_srv["command"]
     assert os.path.isabs(fs_srv["command"])
     assert is_wrapped_server(fs_srv)
     assert fs_srv["args"] == [
@@ -81,7 +81,7 @@ def test_init_fake_claude_desktop(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
     assert fs_srv["env"] == {"TEST_VAR": "secret"}
 
     # github wrapped
-    assert "mcp-guard" in gh_srv["command"]
+    assert "mcp-integrity" in gh_srv["command"]
     assert os.path.isabs(gh_srv["command"])
     assert is_wrapped_server(gh_srv)
     assert gh_srv["args"] == [
@@ -212,9 +212,9 @@ def test_enforce_and_audit_mode_switch(tmp_path: Path, monkeypatch: pytest.Monke
 
 
 def test_status_reporting(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture):
-    guard_home = tmp_path / "mcp_guard_home"
+    guard_home = tmp_path / "mcp_integrity_home"
     guard_home.mkdir(parents=True, exist_ok=True)
-    monkeypatch.setenv("MCP_GUARD_HOME", str(guard_home))
+    monkeypatch.setenv("MCP_INTEGRITY_HOME", str(guard_home))
 
     fake_home = tmp_path / "user_home"
     fake_home.mkdir(parents=True, exist_ok=True)
@@ -227,21 +227,21 @@ def test_status_reporting(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsy
     assert "servers: none found" in out_empty
     assert "no calls logged yet — is your client restarted?" in out_empty
 
-    # Create real executable file named mcp-guard in tmp
-    real_launcher = tmp_path / "bin" / "mcp-guard"
+    # Create real executable file named mcp-integrity in tmp
+    real_launcher = tmp_path / "bin" / "mcp-integrity"
     real_launcher.parent.mkdir(parents=True, exist_ok=True)
     real_launcher.write_text("#!/bin/sh\nexit 0\n")
     real_launcher.chmod(0o755)
 
     # Create fixture client configs with:
-    # 1. one wrapped whose command is a real executable file named mcp-guard (chmod +x)
+    # 1. one wrapped whose command is a real executable file named mcp-integrity (chmod +x)
     # 2. one unwrapped
     # 3. one remote (url)
     # 4. one wrapped whose command path does not exist
     claude_dir = fake_home / "Library" / "Application Support" / "Claude"
     claude_dir.mkdir(parents=True, exist_ok=True)
     cfg_file = claude_dir / "claude_desktop_config.json"
-    broken_cmd = str(tmp_path / "nonexistent" / "mcp-guard")
+    broken_cmd = str(tmp_path / "nonexistent" / "mcp-integrity")
     cfg_data = {
         "mcpServers": {
             "wrapped_ok": {
@@ -338,8 +338,8 @@ def test_status_reporting(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsy
 
     assert "mode: audit" in out
     assert "protected (1): Claude Desktop/wrapped_ok" in out
-    assert "unprotected (1): Claude Desktop/unwrapped_srv   run 'mcp-guard init' to protect" in out
-    assert "broken (1): Claude Desktop/wrapped_broken   launcher not found; re-run 'mcp-guard init'" in out
+    assert "unprotected (1): Claude Desktop/unwrapped_srv   run 'mcp-integrity init' to protect" in out
+    assert "broken (1): Claude Desktop/wrapped_broken   launcher not found; re-run 'mcp-integrity init'" in out
     assert "remote, not covered (1): Claude Desktop/remote_srv" in out
     assert "4 calls" in out
     assert "3 would-block" in out
@@ -397,7 +397,7 @@ def test_vscode_and_claude_code_schemas(tmp_path: Path, monkeypatch: pytest.Monk
 
     # Verify VS Code wrapping
     vsc_data = json.loads(vscode_file.read_text(encoding="utf-8"))
-    assert "mcp-guard" in vsc_data["servers"]["vsc_srv"]["command"]
+    assert "mcp-integrity" in vsc_data["servers"]["vsc_srv"]["command"]
     assert vsc_data["servers"]["vsc_srv"]["args"] == [
         "run",
         "--name",
@@ -411,7 +411,7 @@ def test_vscode_and_claude_code_schemas(tmp_path: Path, monkeypatch: pytest.Monk
 
     # Verify Claude Code wrapping
     cc_data = json.loads(claude_file.read_text(encoding="utf-8"))
-    assert "mcp-guard" in cc_data["mcpServers"]["global_srv"]["command"]
+    assert "mcp-integrity" in cc_data["mcpServers"]["global_srv"]["command"]
     assert cc_data["mcpServers"]["global_srv"]["args"] == [
         "run",
         "--name",
@@ -423,7 +423,7 @@ def test_vscode_and_claude_code_schemas(tmp_path: Path, monkeypatch: pytest.Monk
         "--global",
     ]
     proj_block = cc_data["projects"][proj_path]["mcpServers"]["proj_srv"]
-    assert "mcp-guard" in proj_block["command"]
+    assert "mcp-integrity" in proj_block["command"]
     assert proj_block["args"] == [
         "run",
         "--name",
@@ -477,9 +477,9 @@ def test_init_no_configs_found(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, 
 
 
 def test_cli_log_and_pin_list(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture):
-    guard_home = tmp_path / "mcp_guard_home"
+    guard_home = tmp_path / "mcp_integrity_home"
     guard_home.mkdir(parents=True, exist_ok=True)
-    monkeypatch.setenv("MCP_GUARD_HOME", str(guard_home))
+    monkeypatch.setenv("MCP_INTEGRITY_HOME", str(guard_home))
 
     ts = "2026-09-20T12:00:00+00:00"
     log_entry = json.dumps({

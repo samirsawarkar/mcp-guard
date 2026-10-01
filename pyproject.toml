@@ -3,7 +3,7 @@ requires = ["setuptools>=77.0.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "mcp-guard"
+name = "mcp-integrity"
 version = "0.1.0"
 description = "A local integrity monitor for stdio MCP servers"
 readme = "README.md"
@@ -34,9 +34,9 @@ dev = [
 ]
 
 [project.scripts]
-mcp-guard = "mcp_guard.cli:main"
+mcp-integrity = "mcp_integrity.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["mcp_guard*"]
+include = ["mcp_integrity*"]
 exclude = ["tests*", ".aes*"]

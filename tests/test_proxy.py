@@ -9,7 +9,7 @@ import time
 from pathlib import Path
 
 import pytest
-from mcp_guard.proxy import Proxy
+from mcp_integrity.proxy import Proxy
 
 
 FAKE_SERVER_PATH = Path(__file__).parent / "fake_server.py"
@@ -20,7 +20,7 @@ def test_proxy_passthrough_and_byte_fidelity():
     cmd = [
         sys.executable,
         "-m",
-        "mcp_guard.cli",
+        "mcp_integrity.cli",
         "run",
         "--",
         sys.executable,
@@ -75,7 +75,7 @@ def test_proxy_exit_on_stdin_close():
     cmd = [
         sys.executable,
         "-m",
-        "mcp_guard.cli",
+        "mcp_integrity.cli",
         "run",
         "--",
         sys.executable,
@@ -132,7 +132,7 @@ def test_proxy_terminates_stubborn_child():
     cmd = [
         sys.executable,
         "-m",
-        "mcp_guard.cli",
+        "mcp_integrity.cli",
         "run",
         "--",
         sys.executable,

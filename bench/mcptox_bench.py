@@ -1,4 +1,4 @@
-"""MCPTox benchmark runner for mcp-guard.
+"""MCPTox benchmark runner for mcp-integrity.
 
 Measures:
 A) Scanner recall on poisoned descriptions (by paradigm and pooled)
@@ -27,8 +27,8 @@ import warnings
 
 warnings.filterwarnings("ignore", category=SyntaxWarning)
 
-from mcp_guard.guard import Guard, QUARANTINE_FINDINGS
-from mcp_guard.scan import scan_description, scan_manifest
+from mcp_integrity.guard import Guard, QUARANTINE_FINDINGS
+from mcp_integrity.scan import scan_description, scan_manifest
 
 EXPECTED_SHA256 = "79a90049be931c59e71446d6180b1d7f0d196d123d08a59bc155d142b5041c03"
 AUTHOR_LABELS = ["Success", "Failure-Direct Execution", "Failure-Ignored", "other"]
@@ -867,7 +867,7 @@ def print_compact_table(results: Dict[str, Any]) -> None:
 
     # Section A
     sec_a = results["scanner_recall_poisoned"]
-    print("\n[A] SCANNER RECALL ON POISONED DESCRIPTIONS (mcp_guard.scan.scan_description)")
+    print("\n[A] SCANNER RECALL ON POISONED DESCRIPTIONS (mcp_integrity.scan.scan_description)")
     print(subsep)
     print(f"{'Paradigm':<14} | {'Instances (k/N)':<17} | {'Inst Recall (95% CI)':<23} | {'Unique (k/N)':<15} | {'Uniq Recall (95% CI)':<23}")
     print(subsep)
@@ -914,14 +914,14 @@ def print_compact_table(results: Dict[str, Any]) -> None:
     print("\nPooled Protection vs False-Block Comparison:")
     s_mcp = f"{p_c['success']['blocked']}/{p_c['success']['n_eval']} ({p_c['success']['block_rate']*100:.1f}%, [{p_c['success']['ci'][0]:.3f}, {p_c['success']['ci'][1]:.3f}])"
     s_p8 = f"{p_c['success']['p8_comparison']['blocked']}/{p_c['success']['p8_comparison']['total']} ({p_c['success']['p8_comparison']['rate']*100:.1f}%)"
-    print(f"  * Attack Success Block Rate:  mcp-guard: {s_mcp:<30} | P8 Contract: {s_p8}")
+    print(f"  * Attack Success Block Rate:  mcp-integrity: {s_mcp:<30} | P8 Contract: {s_p8}")
 
     i_mcp = f"{p_c['failure_ignored']['false_blocked']}/{p_c['failure_ignored']['n_eval']} ({p_c['failure_ignored']['false_block_rate']*100:.1f}%, [{p_c['failure_ignored']['ci'][0]:.3f}, {p_c['failure_ignored']['ci'][1]:.3f}])"
     i_p8 = f"{p_c['failure_ignored']['p8_comparison']['false_blocked']}/{p_c['failure_ignored']['p8_comparison']['total']} ({p_c['failure_ignored']['p8_comparison']['rate']*100:.1f}%)"
-    print(f"  * Failure-Ignored False Block: mcp-guard: {i_mcp:<30} | P8 Contract: {i_p8}")
+    print(f"  * Failure-Ignored False Block: mcp-integrity: {i_mcp:<30} | P8 Contract: {i_p8}")
 
     print("\nPer-Model Breakdown:")
-    m_hdr = f"{'Model':<23} | {'n_eval':<6} | {'mcp-guard Succ':<17} | {'P8 Succ':<9} | {'mcp-guard False-Blk':<19} | {'P8 False-Blk':<12}"
+    m_hdr = f"{'Model':<23} | {'n_eval':<6} | {'mcp-integrity Succ':<17} | {'P8 Succ':<9} | {'mcp-integrity False-Blk':<19} | {'P8 False-Blk':<12}"
     print(m_hdr)
     print("-" * len(m_hdr))
     for m, m_data in sec_c["models"].items():
@@ -996,7 +996,7 @@ def print_compact_table(results: Dict[str, Any]) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="MCPTox benchmark runner for mcp-guard")
+    parser = argparse.ArgumentParser(description="MCPTox benchmark runner for mcp-integrity")
     parser.add_argument(
         "--data",
         type=Path,

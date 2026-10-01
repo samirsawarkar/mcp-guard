@@ -42,10 +42,10 @@ jobs:
               sys.exit("Version not found in pyproject.toml")
           pyproject_version = match.group(1)
 
-          init_py = Path("mcp_guard/__init__.py").read_text(encoding="utf-8")
+          init_py = Path("mcp_integrity/__init__.py").read_text(encoding="utf-8")
           match_init = re.search(r"(?m)^__version__\s*=\s*[\"\x27]([^\"\x27]+)[\"\x27]", init_py)
           if not match_init:
-              sys.exit("Version not found in mcp_guard/__init__.py")
+              sys.exit("Version not found in mcp_integrity/__init__.py")
           code_version = match_init.group(1)
 
           print(f"Tag version:       {tag_version}")
@@ -55,7 +55,7 @@ jobs:
           if tag_version != pyproject_version:
               sys.exit(f"Tag version ({tag_version}) != pyproject.toml version ({pyproject_version})")
           if tag_version != code_version:
-              sys.exit(f"Tag version ({tag_version}) != mcp_guard.__version__ ({code_version})")
+              sys.exit(f"Tag version ({tag_version}) != mcp_integrity.__version__ ({code_version})")
           print("Version verification passed.")
           '
 
@@ -81,7 +81,7 @@ jobs:
               names = z.namelist()
               for name in names:
                   print(f"  {name}")
-                  if not (name.startswith("mcp_guard/") or ".dist-info/" in name):
+                  if not (name.startswith("mcp_integrity/") or ".dist-info/" in name):
                       sys.exit(f"Unexpected file in wheel: {name}")
                   for forbidden in ("tests/", "bench/", ".aes/"):
                       if forbidden in name:
@@ -93,7 +93,7 @@ jobs:
         run: |
           python -m venv test_venv
           test_venv/bin/pip install dist/*.whl
-          MCP_GUARD_BIN="$PWD/test_venv/bin/mcp-guard" pytest -q tests/test_e2e_installed.py -v
+          MCP_INTEGRITY_BIN="$PWD/test_venv/bin/mcp-integrity" pytest -q tests/test_e2e_installed.py -v
 
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1

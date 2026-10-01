@@ -45,7 +45,7 @@ jobs:
               names = z.namelist()
               for name in names:
                   print(f"  {name}")
-                  if not (name.startswith("mcp_guard/") or ".dist-info/" in name):
+                  if not (name.startswith("mcp_integrity/") or ".dist-info/" in name):
                       sys.exit(f"Unexpected file in wheel: {name}")
                   for forbidden in ("tests/", "bench/", ".aes/"):
                       if forbidden in name:
@@ -57,4 +57,4 @@ jobs:
         run: |
           python -m venv test_venv
           test_venv/bin/pip install dist/*.whl
-          MCP_GUARD_BIN="$PWD/test_venv/bin/mcp-guard" pytest -q tests/test_e2e_installed.py -v
+          MCP_INTEGRITY_BIN="$PWD/test_venv/bin/mcp-integrity" pytest -q tests/test_e2e_installed.py -v

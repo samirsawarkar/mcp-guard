@@ -4,23 +4,23 @@ import json
 import os
 from pathlib import Path
 
-from mcp_guard.clients import write_json_atomic
+from mcp_integrity.clients import write_json_atomic
 
 
 def get_guard_home(override: Path | str | None = None) -> Path:
-    """Resolve the mcp-guard state directory.
+    """Resolve the mcp-integrity state directory.
     
     Precedence:
     1. Explicit override (e.g. CLI --home)
-    2. MCP_GUARD_HOME environment variable
-    3. Default ~/.mcp-guard
+    2. MCP_INTEGRITY_HOME environment variable
+    3. Default ~/.mcp-integrity
     """
     if override is not None:
         return Path(override)
-    env_home = os.environ.get("MCP_GUARD_HOME")
+    env_home = os.environ.get("MCP_INTEGRITY_HOME")
     if env_home:
         return Path(env_home)
-    return Path.home() / ".mcp-guard"
+    return Path.home() / ".mcp-integrity"
 
 
 def get_config_mode(home: Path | str | None = None) -> str:

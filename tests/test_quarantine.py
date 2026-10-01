@@ -573,9 +573,10 @@ def test_pagination_cross_tool_and_quarantine_regression(tmp_path: Path):
 
 
 
-def test_pagination_audit_logs_cross_tool_reference_added_by_later_page(tmp_path: Path):
+@pytest.mark.parametrize("mode", ["audit", "enforce"])
+def test_pagination_logs_cross_tool_reference_added_by_later_page(tmp_path: Path, mode: str):
     audit_file = tmp_path / "audit.jsonl"
-    guard = Guard(mode="audit", audit_path=audit_file, pins_path=tmp_path / "pins.json", server="srv")
+    guard = Guard(mode=mode, audit_path=audit_file, pins_path=tmp_path / "pins.json", server="srv")
 
     def entries():
         return [json.loads(l) for l in audit_file.read_text(encoding="utf-8").splitlines()] if audit_file.exists() else []

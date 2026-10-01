@@ -1,22 +1,23 @@
 [build-system]
-requires = ["setuptools>=61.0"]
+requires = ["setuptools>=77.0.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "mcp-guard"
 version = "0.1.0"
-description = "A local firewall for MCP tool calls"
+description = "A local integrity monitor for stdio MCP servers"
 readme = "README.md"
 authors = [
     { name = "Samir Sawarkar" }
 ]
-license = { text = "MIT" }
+license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.10"
 keywords = ["mcp", "security", "tool-poisoning", "prompt-injection"]
 classifiers = [
     "Programming Language :: Python :: 3",
-    "License :: OSI Approved :: MIT License",
-    "Operating System :: OS Independent",
+    "Operating System :: MacOS :: MacOS X",
+    "Operating System :: POSIX :: Linux",
     "Topic :: Security",
 ]
 dependencies = []

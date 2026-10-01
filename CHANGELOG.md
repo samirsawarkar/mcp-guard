@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.1.0 - unreleased (planned 2026-10-01)
+## 0.1.0 - 2026-10-01
 
 - Stdio proxy between an MCP client and a server. Logs every tool call with argument names only, never values.
 - Audit mode (default) logs; enforce mode blocks. In enforce mode a tool call is refused until the server's tools/list has been seen (fails closed).
@@ -10,3 +10,6 @@
 - Config and pin files are written atomically.
 - `mcp-guard status` reports what is actually protected, unprotected, broken or remote, plus 24h counts.
 - MCPTox numbers for the scanner, quarantine, call rules and pinning: see [Measured on MCPTox](README.md#measured-on-mcptox).
+
+- Paginated tools/list scans log newly discovered cross-tool warnings from earlier pages without duplicating unchanged findings.
+- Setup instructions cover Python requirements, virtual environments, client restarts and exact pin server keys.

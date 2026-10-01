@@ -7,12 +7,24 @@ mcp-guard is a local integrity monitor for stdio MCP servers. It sits between yo
 
 ## 30-second install
 
+Requires Python 3.10 or newer and an existing stdio MCP server configured in your client. This release is tested on macOS and Linux. Windows has not been validated.
+
 ```bash
 pip install mcp-guard
 mcp-guard init
 ```
 
-Restart Claude Desktop / Cursor / whatever you use.
+If your Python installation refuses package installation into the system environment, use a virtual environment:
+
+```bash
+python3 -m venv ~/.venvs/mcp-guard
+~/.venvs/mcp-guard/bin/pip install mcp-guard
+~/.venvs/mcp-guard/bin/mcp-guard init
+```
+
+Keep that environment installed: the client configuration uses its absolute launcher path. Use the same launcher for `status`, `enforce`, and other commands.
+
+Restart your MCP client (for example, Claude Desktop or Cursor).
 
 ```bash
 mcp-guard status
@@ -44,7 +56,7 @@ changed tools: none
 
 ## Audit mode vs enforce mode
 
-Default is audit: nothing changes for you, you just get a log. Run `mcp-guard enforce` to block rule violations with an MCP error response. In enforce mode, tools with a high-confidence scanner finding are also quarantined: removed from tools/list so the model never sees them. Use `mcp-guard pin --trust <server> <tool>` for a clean tool that got removed. Run `mcp-guard audit` to go back.
+Default is audit: nothing changes for you, you just get a log. Run `mcp-guard enforce` to block rule violations with an MCP error response. In enforce mode, tools with a high-confidence scanner finding are also quarantined: removed from tools/list so the model never sees them. Use `mcp-guard pin --trust <server> <tool>` for a clean tool that got removed. Run `mcp-guard audit` to go back. Restart your client after either mode change so its server processes use the new mode.
 
 ## What it does NOT do
 
@@ -99,6 +111,8 @@ Needs the MCPTox data file from inspect-evals-mcptox (default path ~/Library/Cac
 - `mcp-guard pin --list` / `--accept` / `--trust`: Lists pinned tool statuses, accepts updated hashes after a legitimate tool change, or trusts a tool to bypass quarantine.
 - `mcp-guard uninstall`: Restores all wrapped client configs to their original unwrapped commands.
 - `mcp-guard run`: Wraps a single server by hand (`mcp-guard run -- <server_command>`).
+
+For `pin --trust` and `pin --accept`, use the exact server key printed by `mcp-guard pin --list` (for example, `filesystem-012345abcdef`), plus the tool name. Restart the server or client after trusting or accepting a tool so it refreshes tools/list. Trust applies only to the specific tool hash; a later description or schema change still requires review.
 
 ## Why
 

@@ -21,7 +21,7 @@ mcp-guard status
 ```text
 mode: audit (nothing is blocked; run 'mcp-guard enforce' to block)
 protected (3): Claude Desktop/filesystem, Claude Desktop/github, Claude Desktop/postgres
-last 24h: 142 calls, 1 would-block, 1 suspicious description, 0 changed tools
+last 24h: 142 calls, 1 would-block, 1 suspicious description, 0 changed tools, 0 quarantined
 would block:
   github   delete_repo   unknown_tool   x1
 suspicious:
@@ -37,18 +37,21 @@ changed tools: none
 | `unknown_tool` | Client calls a tool not declared in the server's tools/list manifest | Yes |
 | `extra_argument` | Client sends arguments not defined in the tool's inputSchema | Yes |
 | `tool_changed` | Server silently altered a tool's schema or description after first run (rug-pull) | Yes |
-| `suspicious_description` | Tool description contains prompt injection heuristics (finding labels: `hidden_instruction`, `exfiltration_target`, `sensitive_path`, `invisible_unicode`, `cross_tool_reference`) | No (warn only) |
+| `suspicious_description` | Tool description matches any scanner finding: `hidden_instruction`, `exfiltration_target`, `sensitive_path`, `invisible_unicode`, `cross_tool_reference` | No. Warns in both modes; the tool still reaches the model. In enforce mode a tool that gets quarantined is logged as `quarantined` instead |
+| `quarantined` | Enforce mode only. Tool description has a high-confidence finding: `hidden_instruction`, `exfiltration_target`, `sensitive_path` or `invisible_unicode` | Yes. The tool is removed from tools/list so the model never sees it |
+
+`cross_tool_reference` is warning-only. It never removes a tool, in either mode.
 
 ## Audit mode vs enforce mode
 
-Default is audit: nothing changes for you, you just get a log. Run `mcp-guard enforce` to block rule violations with an MCP error response. Run `mcp-guard audit` to go back.
+Default is audit: nothing changes for you, you just get a log. Run `mcp-guard enforce` to block rule violations with an MCP error response. In enforce mode, tools with a high-confidence scanner finding are also quarantined: removed from tools/list so the model never sees them. Use `mcp-guard pin --trust <server> <tool>` for a clean tool that got removed. Run `mcp-guard audit` to go back.
 
 ## What it does NOT do
 
 - Does not see your chat messages, so it cannot check whether a tool call's arguments match what you asked (that check exists in the underlying research but needs the user turn; coming as a library API for people who run their own agent loop).
 - Does not inspect tool RESULTS.
 - Does not protect remote (HTTP/SSE) servers yet.
-- Heuristic scanner can miss things and can false-positive; that's why it only warns.
+- The heuristic scanner can miss poisoned tools (about 30% on MCPTox) and can remove clean ones (0.8% of clean tools on MCPTox). Use `mcp-guard pin --trust <server> <tool>` for a clean tool it removed.
 
 ## Measured on MCPTox
 
@@ -57,14 +60,19 @@ We ran mcp-guard's own rules over MCPTox, a public tool-poisoning benchmark (1,3
 | Check | Result | 95% CI |
 | --- | --- | --- |
 | Scanner: poisoned descriptions flagged | 70.4% (924 / 1,312) | 67.9 to 72.8% |
-| Scanner: clean descriptions flagged (false positives) | 0.9% (3 / 327) | 0.3 to 2.7% |
+| Scanner, per description: clean descriptions flagged | 0.9% (3 / 327) | 0.3 to 2.7% |
+| Warnings in the proxy (incl. cross-tool): clean tools flagged | 4.4% (16 / 362), 6 of 45 servers | 2.7 to 7.1% |
+| Quarantine: clean tools removed | 0.8% (3 / 362), 3 of 45 servers | 0.3 to 2.4% |
+| Quarantine: poisoned tools removed | 70.4% (924 / 1,312) | 67.9 to 72.8% |
+| Quarantine: successful attacks whose poisoned tool is removed | 66.9% (1,167 / 1,745), upper-bound estimate from a $0 replay, not a live rerun | 64.6 to 69.0% |
 | Call rules: successful attacks blocked | 3.8% (62 / 1,653) | 2.9 to 4.8% |
 | Call rules: harmless responses blocked | 3.5% (184 / 5,188) | 3.1 to 4.1% |
 | Pinning: attacks detected | 0% (0 / 1,312) | n/a |
 
 What this means:
-- The scanner is the part that works against this attack. Today it only warns: the poisoned tool still reaches the model.
-- The call rules barely help here: MCPTox attacks call real, listed tools with valid arguments.
+- Quarantine is the part that acts against this attack. In enforce mode it removes the poisoned tool in 70.4% of MCPTox instances, so the model never sees it.
+- The 66.9% is an upper bound. It assumes that removing the poisoned tool removes the attack. It comes from replaying recorded responses, not from rerunning the models.
+- The call rules barely help here (3.8% of successful attacks blocked): MCPTox attacks call real, listed tools with valid arguments.
 - Pinning catches a tool that changes after you first saw it. Every MCPTox attack adds a new tool instead, so pinning sees none of them.
 
 Reproduce:
@@ -88,7 +96,7 @@ Needs the MCPTox data file from inspect-evals-mcptox (default path ~/Library/Cac
 - `mcp-guard log`: Displays audit log entries in `<time> <server> <tool> <rule>` format; supports `--tail N` and `--follow`.
 - `mcp-guard enforce`: Switches all wrapped servers to enforce mode.
 - `mcp-guard audit`: Switches all wrapped servers to audit mode.
-- `mcp-guard pin --list` / `--accept`: Lists pinned tool statuses or accepts updated hashes after a legitimate tool change.
+- `mcp-guard pin --list` / `--accept` / `--trust`: Lists pinned tool statuses, accepts updated hashes after a legitimate tool change, or trusts a tool to bypass quarantine.
 - `mcp-guard uninstall`: Restores all wrapped client configs to their original unwrapped commands.
 - `mcp-guard run`: Wraps a single server by hand (`mcp-guard run -- <server_command>`).
 

@@ -5,6 +5,7 @@ A) Scanner recall on poisoned descriptions (by paradigm and pooled)
 B) Scanner false positives on clean descriptions
 C) Call-rule replay (unknown_tool + extra_argument) vs FAULTLINE P8 contract
 D) Pinning detection vs MCPTox-style new tool introduction
+E) Quarantine: $0 replay estimate
 """
 from __future__ import annotations
 
@@ -26,8 +27,8 @@ import warnings
 
 warnings.filterwarnings("ignore", category=SyntaxWarning)
 
-from mcp_guard.guard import Guard
-from mcp_guard.scan import scan_description
+from mcp_guard.guard import Guard, QUARANTINE_FINDINGS
+from mcp_guard.scan import scan_description, scan_manifest
 
 EXPECTED_SHA256 = "79a90049be931c59e71446d6180b1d7f0d196d123d08a59bc155d142b5041c03"
 AUTHOR_LABELS = ["Success", "Failure-Direct Execution", "Failure-Ignored", "other"]
@@ -212,11 +213,19 @@ def parse_tool_descriptions(text: str) -> Dict[str, str]:
     return results
 
 
+def _normalize_tool_text(tool_text: str) -> str:
+    s = tool_text.strip()
+    if "\n" not in s:
+        s = s.replace("\\n", "\n")
+    return s
+
+
 def extract_poisoned_tool_description(tool_text: str) -> str:
     """Extract description text from a poisoned_tool definition block."""
-    if "Description:" not in tool_text:
+    s = _normalize_tool_text(tool_text)
+    if "Description:" not in s:
         return ""
-    desc_part = tool_text.split("Description:", 1)[1]
+    desc_part = s.split("Description:", 1)[1]
     if "\nArguments:" in desc_part:
         desc_part = desc_part.split("\nArguments:", 1)[0]
     return desc_part.strip()
@@ -224,7 +233,8 @@ def extract_poisoned_tool_description(tool_text: str) -> str:
 
 def extract_poisoned_tool_name(tool_text: str) -> str:
     """Extract tool name from a poisoned_tool definition block."""
-    for line in tool_text.split("\n"):
+    s = _normalize_tool_text(tool_text)
+    for line in s.split("\n"):
         if line.strip().startswith("Tool:"):
             return line.strip().split("Tool:", 1)[1].strip()
     return ""
@@ -421,12 +431,71 @@ def run_benchmark_b(data: Dict[str, Any]) -> Dict[str, Any]:
     rate = (flagged_count / n_unique_clean) if n_unique_clean > 0 else 0.0
     ci = list(wilson_95(flagged_count, n_unique_clean))
 
+    # Production-path block computed per clean server with scan_manifest on full clean manifest
+    total_servers = len(data["servers"])
+    total_tools = 0
+    tools_with_warning = 0
+    tools_quarantined = 0
+    servers_with_warning = 0
+    servers_with_quarantine = 0
+    clean_manifest_warnings: List[Dict[str, Any]] = []
+    clean_manifest_quarantines: List[Dict[str, Any]] = []
+
+    for sname in sorted(data["servers"].keys()):
+        server = data["servers"][sname]
+        csp = server.get("clean_system_promot", "")
+        manifest_desc = parse_tool_descriptions(csp)
+        server_tool_count = len(manifest_desc)
+        total_tools += server_tool_count
+
+        findings_map = scan_manifest(manifest_desc)
+
+        s_has_warning = False
+        s_has_quarantine = False
+
+        for tname, f_list in findings_map.items():
+            if f_list:
+                tools_with_warning += 1
+                s_has_warning = True
+                clean_manifest_warnings.append({
+                    "server": sname,
+                    "tool": tname,
+                    "findings": f_list,
+                })
+                if set(f_list) & QUARANTINE_FINDINGS:
+                    tools_quarantined += 1
+                    s_has_quarantine = True
+                    clean_manifest_quarantines.append({
+                        "server": sname,
+                        "tool": tname,
+                        "findings": f_list,
+                    })
+
+        if s_has_warning:
+            servers_with_warning += 1
+        if s_has_quarantine:
+            servers_with_quarantine += 1
+
     return {
         "n_unique_clean": n_unique_clean,
         "flagged_count": flagged_count,
         "rate": rate,
         "ci": ci,
         "flagged_tools": flagged_tools,
+        "production_path": {
+            "total_servers": total_servers,
+            "total_tools": total_tools,
+            "tools_warning_count": tools_with_warning,
+            "tools_warning_rate": (tools_with_warning / total_tools) if total_tools > 0 else 0.0,
+            "tools_warning_ci": list(wilson_95(tools_with_warning, total_tools)),
+            "servers_warning_count": servers_with_warning,
+            "tools_quarantined_count": tools_quarantined,
+            "tools_quarantined_rate": (tools_quarantined / total_tools) if total_tools > 0 else 0.0,
+            "tools_quarantined_ci": list(wilson_95(tools_quarantined, total_tools)),
+            "servers_quarantined_count": servers_with_quarantine,
+            "warning_tools": clean_manifest_warnings,
+            "quarantined_tools": clean_manifest_quarantines,
+        },
     }
 
 
@@ -653,6 +722,136 @@ def run_benchmark_d(data: Dict[str, Any], tmp_dir: Path) -> Dict[str, Any]:
     }
 
 
+def run_benchmark_e(data: Dict[str, Any], tmp_dir: Path) -> Dict[str, Any]:
+    """E) Quarantine: $0 replay estimate over non-wrong_data instances and 10,227 traces."""
+    label_text = "upper-bound estimate: assumes removing the poisoned tool removes the attack; not a live rerun"
+
+    # Step 1: For each non-wrong_data instance, run Guard in enforce mode
+    instance_info: Dict[int, Dict[str, Any]] = {}
+    inst_idx = 0
+    total_instances = 0
+    collateral_instances = 0
+    clean_tools_total = 0
+    clean_tools_removed = 0
+    poisoned_removed_instances = 0
+
+    for server_name, server in data["servers"].items():
+        for inst in server["malicious_instance"]:
+            if inst.get("wrong_data"):
+                continue
+            inst_idx += 1
+            total_instances += 1
+            paradigm = inst.get("metadata", {}).get("paradigm", "Other")
+            datas0 = inst["datas"][0]
+            poisoned_args_map = parse_tool_block(datas0["system"])
+            poisoned_desc_map = parse_tool_descriptions(datas0["system"])
+            poisoned_tools_list = [
+                {
+                    "name": t,
+                    "description": poisoned_desc_map.get(t, ""),
+                    "inputSchema": {"type": "object", "properties": {arg: {} for arg in args}},
+                }
+                for t, args in poisoned_args_map.items()
+            ]
+
+            pt_name = extract_poisoned_tool_name(inst.get("poisoned_tool", ""))
+
+            audit_path = tmp_dir / f"audit_e_{inst_idx}.jsonl"
+            pins_path = tmp_dir / f"pins_e_{inst_idx}.json"
+            guard = Guard(mode="enforce", server=server_name, audit_path=audit_path, pins_path=pins_path)
+
+            with contextlib.redirect_stderr(io.StringIO()):
+                guard.client_line(b'{"jsonrpc": "2.0", "id": 1, "method": "tools/list"}\n')
+                resp_in = json.dumps({"jsonrpc": "2.0", "id": 1, "result": {"tools": poisoned_tools_list}}).encode("utf-8") + b"\n"
+                resp_out = guard.server_line(resp_in)
+
+            out_data = json.loads(resp_out.decode("utf-8"))
+            forwarded_tools = set(t["name"] for t in out_data.get("result", {}).get("tools", []))
+
+            poisoned_removed = (pt_name not in forwarded_tools)
+            clean_tools_in_manifest = set(t for t in poisoned_args_map.keys() if t != pt_name)
+            n_clean_removed = len(clean_tools_in_manifest - forwarded_tools)
+            clean_tools_total += len(clean_tools_in_manifest)
+            clean_tools_removed += n_clean_removed
+            collateral_removed = n_clean_removed > 0
+
+            if poisoned_removed:
+                poisoned_removed_instances += 1
+            if collateral_removed:
+                collateral_instances += 1
+
+            instance_info[id(inst)] = {
+                "paradigm": paradigm,
+                "poisoned_removed": poisoned_removed,
+                "collateral_removed": collateral_removed,
+            }
+
+    # Step 2: Over the 10,227 traces (same filter as C)
+    total_traces = 0
+    success_traces = 0
+    success_poisoned_removed = 0
+
+    by_paradigm: Dict[str, Dict[str, int]] = defaultdict(lambda: {"total": 0, "poisoned_removed": 0})
+    by_model: Dict[str, Dict[str, int]] = defaultdict(lambda: {"total": 0, "poisoned_removed": 0})
+
+    for server_name, server in data["servers"].items():
+        for inst in server["malicious_instance"]:
+            if inst.get("wrong_data"):
+                continue
+            info = instance_info[id(inst)]
+            paradigm = info["paradigm"]
+            p_rem = info["poisoned_removed"]
+            datas0 = inst["datas"][0]
+            responses = datas0.get("response", {})
+            labels = datas0.get("label", {})
+
+            for model, resp_text in responses.items():
+                total_traces += 1
+                raw_label = labels.get(model, "other")
+                label = raw_label if raw_label in AUTHOR_LABELS else "other"
+                if label == "Success":
+                    success_traces += 1
+                    by_paradigm[paradigm]["total"] += 1
+                    by_model[model]["total"] += 1
+                    if p_rem:
+                        success_poisoned_removed += 1
+                        by_paradigm[paradigm]["poisoned_removed"] += 1
+                        by_model[model]["poisoned_removed"] += 1
+
+    def compute_rate_ci(succ: int, tot: int) -> Dict[str, Any]:
+        return {
+            "success_total": tot,
+            "poisoned_removed": succ,
+            "rate": (succ / tot) if tot > 0 else 0.0,
+            "ci": list(wilson_95(succ, tot)),
+        }
+
+    return {
+        "estimate_label": label_text,
+        "instances": {
+            "total": total_instances,
+            "poisoned_removed": poisoned_removed_instances,
+            "poisoned_removed_rate": (poisoned_removed_instances / total_instances) if total_instances > 0 else 0.0,
+            "poisoned_removed_ci": list(wilson_95(poisoned_removed_instances, total_instances)),
+            "collateral_removed": collateral_instances,
+            "collateral_removed_rate": (collateral_instances / total_instances) if total_instances > 0 else 0.0,
+            "collateral_removed_ci": list(wilson_95(collateral_instances, total_instances)),
+            "collateral_removed_description": "instances (of total) in which at least one clean tool was removed; not a count of tools",
+            "clean_tools_total": clean_tools_total,
+            "clean_tools_removed": clean_tools_removed,
+        },
+        "traces": {
+            "total": total_traces,
+            "success_total": success_traces,
+            "success_poisoned_removed": success_poisoned_removed,
+            "success_quarantine_rate": (success_poisoned_removed / success_traces) if success_traces > 0 else 0.0,
+            "success_quarantine_ci": list(wilson_95(success_poisoned_removed, success_traces)),
+        },
+        "by_paradigm": {p: compute_rate_ci(by_paradigm[p]["poisoned_removed"], by_paradigm[p]["total"]) for p in sorted(by_paradigm.keys())},
+        "by_model": {m: compute_rate_ci(by_model[m]["poisoned_removed"], by_model[m]["total"]) for m in sorted(by_model.keys())},
+    }
+
+
 # ==============================================================================
 # Compact Table Printer
 # ==============================================================================
@@ -747,6 +946,47 @@ def print_compact_table(results: Dict[str, Any]) -> None:
     tc_pl_str = f"{pl_d['tool_changed']}/{pl_d['total']} ({pl_d['tool_changed']/pl_d['total']*100:.1f}%)"
     bn_pl_str = f"{pl_d['brand_new']}/{pl_d['total']} ({pl_d['brand_new']/pl_d['total']*100:.1f}%)"
     print(f"{'POOLED TOTAL':<14} | {pl_d['total']:<10} | {tc_pl_str:<28} | {bn_pl_str:<25}")
+
+    # Section E
+    if "quarantine_replay" in results:
+        sec_e = results["quarantine_replay"]
+        print("\n\n[E] QUARANTINE, $0 REPLAY ESTIMATE (ENFORCE MODE)")
+        print(subsep)
+        print(f"Note: {sec_e['estimate_label']}")
+        inst_e = sec_e["instances"]
+        tr_e = sec_e["traces"]
+        print(
+            f"\nInstance Quarantine: {inst_e['poisoned_removed']}/{inst_e['total']} poisoned tools removed "
+            f"({inst_e['poisoned_removed_rate']*100:.1f}%, 95% CI [{inst_e['poisoned_removed_ci'][0]:.3f}, {inst_e['poisoned_removed_ci'][1]:.3f}])"
+        )
+        print(
+            f"Collateral Removal:  {inst_e['collateral_removed']}/{inst_e['total']} instances with at least one clean tool removed "
+            f"({inst_e['collateral_removed_rate']*100:.1f}%, 95% CI [{inst_e['collateral_removed_ci'][0]:.3f}, {inst_e['collateral_removed_ci'][1]:.3f}])"
+        )
+        print(f"Clean Tools Removed: {inst_e['clean_tools_removed']}/{inst_e['clean_tools_total']} clean tool slots across all instances")
+        print(
+            f"\nPooled Trace Attack Neutralization (Author 'Success' Traces): "
+            f"{tr_e['success_poisoned_removed']}/{tr_e['success_total']} ({tr_e['success_quarantine_rate']*100:.1f}%, 95% CI [{tr_e['success_quarantine_ci'][0]:.3f}, {tr_e['success_quarantine_ci'][1]:.3f}])"
+        )
+
+        print("\nPer-Paradigm Success Neutralization:")
+        p_hdr = f"{'Paradigm':<14} | {'Success Neutralized (k/N)':<26} | {'Quarantine Rate (95% CI)':<26}"
+        print(p_hdr)
+        print("-" * len(p_hdr))
+        for p, p_data in sec_e["by_paradigm"].items():
+            s_str = f"{p_data['poisoned_removed']}/{p_data['success_total']}"
+            r_str = f"{p_data['rate']*100:5.1f}% [{p_data['ci'][0]:.3f}, {p_data['ci'][1]:.3f}]"
+            print(f"{p:<14} | {s_str:<26} | {r_str:<26}")
+
+        print("\nPer-Model Success Neutralization:")
+        m_hdr = f"{'Model':<23} | {'Success Neutralized (k/N)':<26} | {'Quarantine Rate (95% CI)':<26}"
+        print(m_hdr)
+        print("-" * len(m_hdr))
+        for m, m_data in sec_e["by_model"].items():
+            s_str = f"{m_data['poisoned_removed']}/{m_data['success_total']}"
+            r_str = f"{m_data['rate']*100:5.1f}% [{m_data['ci'][0]:.3f}, {m_data['ci'][1]:.3f}]"
+            print(f"{m:<23} | {s_str:<26} | {r_str:<26}")
+
     print(sep + "\n")
 
 
@@ -790,12 +1030,14 @@ def main() -> None:
         res_b = run_benchmark_b(data)
         res_c = run_benchmark_c(data, tmp_dir)
         res_d = run_benchmark_d(data, tmp_dir)
+        res_e = run_benchmark_e(data, tmp_dir)
 
     all_results = {
         "scanner_recall_poisoned": res_a,
         "scanner_fp_clean": res_b,
         "call_rule_replay": res_c,
         "pinning_vs_mcptox": res_d,
+        "quarantine_replay": res_e,
     }
 
     args.out.parent.mkdir(parents=True, exist_ok=True)

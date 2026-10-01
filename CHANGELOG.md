@@ -1,9 +1,12 @@
 # Changelog
 
-## 0.1.0 - 2026-09-20
+## 0.1.0 - unreleased (planned 2026-10-01)
 
-- Transparent byte-faithful stdio proxy between MCP clients and servers.
-- Enforcement of manifest allowlists (blocks unlisted tools and undeclared arguments).
-- Anti-rug-pull schema pinning with cryptographic SHA-256 validation across sessions.
-- Heuristic tool description scanner detecting prompt injection and exfiltration patterns.
-- CLI supporting client config auto-discovery, wrapping, unwrapping, mode toggles, and status audits.
+- Stdio proxy between an MCP client and a server. Logs every tool call with argument names only, never values.
+- Audit mode (default) logs; enforce mode blocks. In enforce mode a tool call is refused until the server's tools/list has been seen (fails closed).
+- Pinning: tool schemas and descriptions are hashed on first run, and a later change is flagged as `tool_changed`. Pin files are kept inside the guard home (`~/.mcp-guard/pins/`).
+- Description scanner. Every finding is logged as a warning. In enforce mode, tools with a high-confidence finding (`hidden_instruction`, `exfiltration_target`, `sensitive_path`, `invisible_unicode`) are quarantined: removed from tools/list. `cross_tool_reference` is warning-only.
+- `mcp-guard pin --trust <server> <tool>` to keep a quarantined tool, and `pin --accept <server> <tool>` to accept a legitimate tool change.
+- Config and pin files are written atomically.
+- `mcp-guard status` reports what is actually protected, unprotected, broken or remote, plus 24h counts.
+- MCPTox numbers for the scanner, quarantine, call rules and pinning: see [Measured on MCPTox](README.md#measured-on-mcptox).
